@@ -353,16 +353,18 @@ async def on_message(message: cl.Message):
             user_content = f"[Transcrição do áudio]\n\n{transcription}"
             
             await processing_msg.remove()
-            # Create expandable transcription section
-            transcription_html = f"""✅ **Áudio transcrito:**
-
-<details>
-<summary><strong>📝 Ver transcrição completa ({len(transcription)} caracteres)</strong></summary>
-
-{transcription}
-
-</details>"""
-            await cl.Message(content=transcription_html).send()
+            # Display transcription in expandable accordion
+            transcription_element = cl.CustomElement(
+                name="TranscriptionAccordion",
+                props={
+                    "transcription": transcription,
+                    "characterCount": len(transcription)
+                }
+            )
+            await cl.Message(
+                content="✅ **Áudio transcrito:**",
+                elements=[transcription_element]
+            ).send()
             
         except Exception as e:
             import traceback

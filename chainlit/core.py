@@ -194,4 +194,7 @@ def transcribe_audio(
         response_format="verbose_json",
     )
     
-    return transcription.text
+    # Replace Unicode line/paragraph separators that cause encoding issues
+    text = transcription.text
+    text = text.replace("\u2028", "\n").replace("\u2029", "\n")
+    return text

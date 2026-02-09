@@ -2,6 +2,11 @@
 
 FROM python:3.11-slim
 
+# Set UTF-8 locale to avoid encoding issues with Unicode text
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV PYTHONIOENCODING=utf-8
+
 # Set working directory
 WORKDIR /app
 

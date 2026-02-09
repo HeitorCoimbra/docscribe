@@ -11,30 +11,17 @@ Features:
 
 import os
 import json
+import logging
+import uuid
 from datetime import datetime
 from typing import Optional
 
 import chainlit as cl
 from chainlit.types import ThreadDict
-from anthropic import Anthropic
 
-from core import (
-    SumarioPaciente,
-    SYSTEM_PROMPT,
-    HUMAN_PROMPT_TEMPLATE,
-    transcribe_audio,
-    CLAUDE_MODEL
-)
-from database import (
-    init_db,
-    SessionLocal,
-    ThreadRepository,
-    MessageRepository,
-    UserRepository
-)
-
-# Initialize database on startup
-init_db()
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # CONFIGURATION
@@ -42,9 +29,65 @@ init_db()
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# Anthropic client
-anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
+# Log configuration status
+logger.info(f"GROQ_API_KEY configured: {bool(GROQ_API_KEY)}")
+logger.info(f"ANTHROPIC_API_KEY configured: {bool(ANTHROPIC_API_KEY)}")
+logger.info(f"DATABASE_URL configured: {bool(DATABASE_URL)}")
+
+# =============================================================================
+# LAZY INITIALIZATION
+# =============================================================================
+
+_anthropic_client = None
+_db_initialized = False
+
+
+def get_anthropic_client():
+    """Get or create Anthropic client."""
+    global _anthropic_client
+    if _anthropic_client is None and ANTHROPIC_API_KEY:
+        from anthropic import Anthropic
+        _anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
+    return _anthropic_client
+
+
+def ensure_db():
+    """Initialize database if not already done."""
+    global _db_initialized
+    if not _db_initialized and DATABASE_URL:
+        try:
+            from database import init_db
+            init_db()
+            _db_initialized = True
+            logger.info("Database initialized successfully")
+        except Exception as e:
+            logger.error(f"Database initialization failed: {e}")
+    return _db_initialized
+
+
+def get_db_session():
+    """Get a database session if available."""
+    if ensure_db():
+        try:
+            from database import SessionLocal
+            return SessionLocal()
+        except Exception as e:
+            logger.error(f"Failed to create DB session: {e}")
+    return None
+
+
+# =============================================================================
+# IMPORT CORE MODULE
+# =============================================================================
+
+from core import (
+    SumarioPaciente,
+    SYSTEM_PROMPT,
+    transcribe_audio,
+    CLAUDE_MODEL
+)
 
 # =============================================================================
 # CHAT SYSTEM PROMPT
@@ -86,86 +129,44 @@ def oauth_callback(
     raw_user_data: dict,
     default_user: cl.User,
 ) -> Optional[cl.User]:
-    """
-    Handle OAuth callback and create/update user in database.
-    """
-    db = SessionLocal()
-    try:
-        user_repo = UserRepository(db)
-        
-        # Extract user info based on provider
-        email = raw_user_data.get("email")
-        name = raw_user_data.get("name") or raw_user_data.get("login")
-        avatar = raw_user_data.get("picture") or raw_user_data.get("avatar_url")
-        
-        if not email:
-            return None
-        
-        # Create or update user in database
-        db_user = user_repo.get_or_create_user(
-            email=email,
-            name=name,
-            avatar_url=avatar,
-            provider=provider_id
-        )
-        
-        # Return Chainlit user with database ID
-        return cl.User(
-            identifier=db_user.id,
-            metadata={
-                "email": email,
-                "name": name,
-                "avatar": avatar,
-                "provider": provider_id
-            }
-        )
-    finally:
-        db.close()
-
-
-# =============================================================================
-# SESSION/THREAD MANAGEMENT
-# =============================================================================
-
-@cl.on_chat_resume
-async def on_chat_resume(thread: ThreadDict):
-    """Resume a previous chat session."""
-    thread_id = thread.get("id")
+    """Handle OAuth callback and create/update user in database."""
+    email = raw_user_data.get("email")
+    name = raw_user_data.get("name") or raw_user_data.get("login")
+    avatar = raw_user_data.get("picture") or raw_user_data.get("avatar_url")
     
-    if not thread_id:
-        return
+    if not email:
+        logger.warning("OAuth callback: no email provided")
+        return default_user
     
-    db = SessionLocal()
-    try:
-        msg_repo = MessageRepository(db)
-        messages = msg_repo.get_thread_messages(thread_id)
-        
-        # Restore message history
-        cl.user_session.set("thread_id", thread_id)
-        
-        history = []
-        for msg in messages:
-            history.append({
-                "role": msg.role,
-                "content": msg.content
-            })
-        
-        cl.user_session.set("message_history", history)
-        
-    finally:
-        db.close()
-
-
-@cl.set_chat_profiles
-async def set_chat_profiles():
-    """Define chat profiles (optional)."""
-    return [
-        cl.ChatProfile(
-            name="DocScribe",
-            markdown_description="Sumário de Pacientes de UTI",
-            icon="https://api.iconify.design/mdi:hospital-building.svg"
-        )
-    ]
+    user_id = email  # Default to email as ID
+    
+    # Try to save to database if available
+    db = get_db_session()
+    if db:
+        try:
+            from database import UserRepository
+            user_repo = UserRepository(db)
+            db_user = user_repo.get_or_create_user(
+                email=email,
+                name=name,
+                avatar_url=avatar,
+                provider=provider_id
+            )
+            user_id = db_user.id
+        except Exception as e:
+            logger.error(f"Database error in oauth_callback: {e}")
+        finally:
+            db.close()
+    
+    return cl.User(
+        identifier=user_id,
+        metadata={
+            "email": email,
+            "name": name,
+            "avatar": avatar,
+            "provider": provider_id
+        }
+    )
 
 
 # =============================================================================
@@ -177,25 +178,29 @@ async def on_chat_start():
     """Initialize new chat session."""
     user = cl.user_session.get("user")
     
-    if not user:
-        await cl.Message(content="❌ Erro de autenticação. Por favor, faça login.").send()
-        return
+    # Generate thread ID
+    thread_id = str(uuid.uuid4())
     
-    # Create new thread in database
-    db = SessionLocal()
-    try:
-        thread_repo = ThreadRepository(db)
-        thread = thread_repo.create_thread(
-            user_id=user.identifier,
-            title="Nova Sessão"
-        )
-        
-        cl.user_session.set("thread_id", thread.id)
-        cl.user_session.set("message_history", [])
-        cl.user_session.set("current_summary", None)
-        
-    finally:
-        db.close()
+    # Try to create thread in database
+    if user:
+        db = get_db_session()
+        if db:
+            try:
+                from database import ThreadRepository
+                thread_repo = ThreadRepository(db)
+                thread = thread_repo.create_thread(
+                    user_id=user.identifier,
+                    title="Nova Sessão"
+                )
+                thread_id = thread.id
+            except Exception as e:
+                logger.error(f"Failed to create thread in DB: {e}")
+            finally:
+                db.close()
+    
+    cl.user_session.set("thread_id", thread_id)
+    cl.user_session.set("message_history", [])
+    cl.user_session.set("current_summary", None)
     
     # Welcome message
     await cl.Message(
@@ -221,20 +226,21 @@ Sou seu assistente para criar sumários de pacientes de UTI.
 @cl.on_message
 async def on_message(message: cl.Message):
     """Handle incoming messages."""
-    user = cl.user_session.get("user")
     thread_id = cl.user_session.get("thread_id")
     
-    if not user or not thread_id:
-        await cl.Message(content="❌ Sessão inválida. Por favor, recarregue a página.").send()
-        return
+    if not thread_id:
+        thread_id = str(uuid.uuid4())
+        cl.user_session.set("thread_id", thread_id)
     
     # Get message history
     history = cl.user_session.get("message_history", [])
     
     # Check for audio file attachments
-    audio_files = [f for f in (message.elements or []) if f.mime and f.mime.startswith("audio/")]
+    audio_files = []
+    if message.elements:
+        audio_files = [f for f in message.elements if f.mime and f.mime.startswith("audio/")]
     
-    user_content = message.content
+    user_content = message.content or ""
     transcription = None
     
     # Process audio if present
@@ -246,9 +252,18 @@ async def on_message(message: cl.Message):
         
         try:
             # Read audio bytes
-            audio_bytes = audio_file.content if hasattr(audio_file, 'content') else open(audio_file.path, 'rb').read()
+            if hasattr(audio_file, 'content') and audio_file.content:
+                audio_bytes = audio_file.content
+            elif hasattr(audio_file, 'path') and audio_file.path:
+                with open(audio_file.path, 'rb') as f:
+                    audio_bytes = f.read()
+            else:
+                raise ValueError("Não foi possível ler o arquivo de áudio")
             
             # Transcribe with Groq Whisper
+            if not GROQ_API_KEY:
+                raise ValueError("GROQ_API_KEY não configurada")
+            
             transcription = transcribe_audio(
                 audio_bytes=audio_bytes,
                 filename=audio_file.name or "audio.mp3",
@@ -258,29 +273,43 @@ async def on_message(message: cl.Message):
             user_content = f"[Transcrição do áudio]\n\n{transcription}"
             
             await processing_msg.remove()
-            await cl.Message(content=f"✅ **Áudio transcrito:**\n\n_{transcription[:500]}{'...' if len(transcription) > 500 else ''}_").send()
+            preview = transcription[:500] + "..." if len(transcription) > 500 else transcription
+            await cl.Message(content=f"✅ **Áudio transcrito:**\n\n_{preview}_").send()
             
         except Exception as e:
             await processing_msg.remove()
             await cl.Message(content=f"❌ Erro na transcrição: {str(e)}").send()
             return
     
+    if not user_content.strip():
+        return
+    
     # Add user message to history
     history.append({"role": "user", "content": user_content})
     
     # Save message to database
-    db = SessionLocal()
-    try:
-        msg_repo = MessageRepository(db)
-        msg_repo.add_message(
-            thread_id=thread_id,
-            role="user",
-            content=user_content,
-            has_audio=bool(audio_files),
-            transcription=transcription
-        )
-    finally:
-        db.close()
+    db = get_db_session()
+    if db:
+        try:
+            from database import MessageRepository
+            msg_repo = MessageRepository(db)
+            msg_repo.add_message(
+                thread_id=thread_id,
+                role="user",
+                content=user_content,
+                has_audio=bool(audio_files),
+                transcription=transcription
+            )
+        except Exception as e:
+            logger.error(f"Failed to save user message: {e}")
+        finally:
+            db.close()
+    
+    # Check if Anthropic is configured
+    client = get_anthropic_client()
+    if not client:
+        await cl.Message(content="❌ ANTHROPIC_API_KEY não configurada").send()
+        return
     
     # Generate response with Claude
     response_msg = cl.Message(content="")
@@ -292,7 +321,7 @@ async def on_message(message: cl.Message):
         
         # Stream response
         full_response = ""
-        with anthropic_client.messages.stream(
+        with client.messages.stream(
             model=CLAUDE_MODEL,
             max_tokens=2048,
             system=CHAT_SYSTEM,
@@ -309,30 +338,32 @@ async def on_message(message: cl.Message):
         cl.user_session.set("message_history", history)
         
         # Save assistant message to database
-        db = SessionLocal()
-        try:
-            msg_repo = MessageRepository(db)
-            msg_repo.add_message(
-                thread_id=thread_id,
-                role="assistant",
-                content=full_response
-            )
-            
-            # Try to extract summary info for thread title
-            await update_thread_from_response(thread_id, full_response)
-            
-        finally:
-            db.close()
+        db = get_db_session()
+        if db:
+            try:
+                from database import MessageRepository, ThreadRepository
+                msg_repo = MessageRepository(db)
+                msg_repo.add_message(
+                    thread_id=thread_id,
+                    role="assistant",
+                    content=full_response
+                )
+                
+                # Try to extract and update thread title
+                await update_thread_title(db, thread_id, full_response)
+            except Exception as e:
+                logger.error(f"Failed to save assistant message: {e}")
+            finally:
+                db.close()
         
     except Exception as e:
+        logger.error(f"Error generating response: {e}")
         await response_msg.update()
         await cl.Message(content=f"❌ Erro: {str(e)}").send()
 
 
-async def update_thread_from_response(thread_id: str, response: str):
-    """
-    Try to extract Leito and patient name from response to update thread title.
-    """
+async def update_thread_title(db, thread_id: str, response: str):
+    """Try to extract Leito and patient name from response to update thread title."""
     import re
     
     # Look for patterns like "Leito 1 - Maria" or "**Leito 1 - Maria**"
@@ -343,91 +374,44 @@ async def update_thread_from_response(thread_id: str, response: str):
         leito = match.group(1).strip()
         patient_name = match.group(2).strip()
         
-        # Clean up patient name (remove trailing punctuation, etc.)
+        # Clean up patient name
         patient_name = re.sub(r'[*\n].*', '', patient_name).strip()
         
         if leito and patient_name and len(patient_name) > 1:
-            db = SessionLocal()
             try:
+                from database import ThreadRepository
                 thread_repo = ThreadRepository(db)
                 thread_repo.update_thread_title(thread_id, leito, patient_name)
-            finally:
-                db.close()
+                logger.info(f"Updated thread title: Leito {leito} - {patient_name}")
+            except Exception as e:
+                logger.error(f"Failed to update thread title: {e}")
 
 
 # =============================================================================
-# SESSION HISTORY SIDEBAR
+# CHAT RESUME (for session history)
 # =============================================================================
 
-@cl.on_settings_update
-async def on_settings_update(settings):
-    """Handle settings updates."""
-    pass
-
-
-# =============================================================================
-# DATA LAYER FOR THREAD HISTORY
-# =============================================================================
-
-@cl.data_layer
-class PostgresDataLayer:
-    """Custom data layer for PostgreSQL session persistence."""
+@cl.on_chat_resume
+async def on_chat_resume(thread: ThreadDict):
+    """Resume a previous chat session."""
+    thread_id = thread.get("id")
     
-    async def get_user_threads(self, user_id: str, pagination=None):
-        """Get threads for sidebar display, grouped by day."""
-        db = SessionLocal()
+    if not thread_id:
+        return
+    
+    db = get_db_session()
+    if db:
         try:
-            thread_repo = ThreadRepository(db)
-            threads = thread_repo.get_user_threads(user_id)
+            from database import MessageRepository
+            msg_repo = MessageRepository(db)
+            messages = msg_repo.get_thread_messages(thread_id)
             
-            return [
-                {
-                    "id": t.id,
-                    "name": t.title or "Nova Sessão",
-                    "createdAt": t.created_at.isoformat(),
-                    "metadata": {
-                        "leito": t.leito,
-                        "patient_name": t.patient_name,
-                        "is_complete": t.is_complete
-                    }
-                }
-                for t in threads
-            ]
+            cl.user_session.set("thread_id", thread_id)
+            
+            history = [{"role": msg.role, "content": msg.content} for msg in messages]
+            cl.user_session.set("message_history", history)
+            
+        except Exception as e:
+            logger.error(f"Failed to resume chat: {e}")
         finally:
             db.close()
-    
-    async def get_thread(self, thread_id: str):
-        """Get a specific thread."""
-        db = SessionLocal()
-        try:
-            thread_repo = ThreadRepository(db)
-            thread = thread_repo.get_thread(thread_id)
-            
-            if not thread:
-                return None
-            
-            return {
-                "id": thread.id,
-                "name": thread.title,
-                "createdAt": thread.created_at.isoformat(),
-                "metadata": {
-                    "leito": thread.leito,
-                    "patient_name": thread.patient_name,
-                    "summary": thread.summary_json
-                }
-            }
-        finally:
-            db.close()
-    
-    async def delete_thread(self, thread_id: str):
-        """Delete a thread."""
-        db = SessionLocal()
-        try:
-            thread_repo = ThreadRepository(db)
-            thread_repo.delete_thread(thread_id)
-        finally:
-            db.close()
-
-
-# Initialize data layer
-# Note: This requires Chainlit data layer feature to be enabled

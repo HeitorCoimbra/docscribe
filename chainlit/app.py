@@ -99,6 +99,11 @@ def get_db_session():
     return None
 
 
+# Initialize DB eagerly so Chainlit's built-in data layer tables exist
+# before its first query (which happens during authentication).
+ensure_db()
+
+
 # =============================================================================
 # IMPORT CORE MODULE
 # =============================================================================
@@ -114,29 +119,60 @@ from core import (
 # CHAT SYSTEM PROMPT
 # =============================================================================
 
-CHAT_SYSTEM = f"""{SYSTEM_PROMPT}
+import re
 
-INSTRUÇÕES PARA CONVERSA:
-1. Quando receber uma transcrição de áudio, analise e apresente o sumário estruturado
-2. Se algo não estiver claro, pergunte ao usuário para esclarecer
-3. Permita correções e ajustes através da conversa
-4. Condutas SEMPRE começam com verbo no INFINITIVO
 
-Quando tiver o sumário completo e confirmado, apresente no formato:
+def extract_summary_from_response(response: str) -> str | None:
+    """Extract the structured summary block from Claude's response."""
+    pattern = r'(\*\*Leito\s+.+?)(?:\n---|\Z)'
+    match = re.search(pattern, response, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
+def build_system_prompt(current_summary: str | None = None) -> str:
+    """Build the system prompt with optional current summary context."""
+    summary_context = ""
+    if current_summary:
+        summary_context = f"""
+=== SUMARIO ATUAL DO PACIENTE (use como base para atualizacoes) ===
+{current_summary}
+=== FIM DO SUMARIO ATUAL ==="""
+
+    return f"""{SYSTEM_PROMPT}
+
+=== INSTRUCOES DE COMPORTAMENTO ===
+
+REGRA PRINCIPAL: Quando receber uma transcricao de audio ou texto de passagem de plantao,
+voce DEVE SEMPRE responder IMEDIATAMENTE com o sumario estruturado abaixo.
+NAO faca perguntas antes de mostrar o sumario. NAO peca confirmacao antes de mostrar o sumario.
+
+Para campos que NAO podem ser preenchidos com base na transcricao, use exatamente:
+PENDENTE
+
+FORMATO OBRIGATORIO DE RESPOSTA:
 
 **Leito [X] - [Nome do Paciente]**
 
-**Diagnósticos:**
-1. [diagnóstico]
+**Diagnosticos:**
+1. [diagnostico extraido ou PENDENTE]
 
-**Pendências:**
-1. [pendência]
+**Pendencias:**
+1. [pendencia extraida ou PENDENTE]
 
 **Condutas:**
-• [conduta com verbo no infinitivo]
+- [conduta com verbo no infinitivo ou PENDENTE]
 
-E pergunte se o usuário deseja salvar o sumário.
-"""
+---
+Deseja corrigir ou adicionar algo?
+
+=== REGRAS DE ATUALIZACAO ===
+- Quando o usuario enviar correcoes, mostre o sumario COMPLETO atualizado (nao apenas o campo alterado)
+- Condutas SEMPRE comecam com verbo no INFINITIVO
+- Seja conciso. Nao repita instrucoes ao usuario, apenas mostre o sumario atualizado.
+
+{summary_context}"""
 
 
 # =============================================================================
@@ -367,10 +403,11 @@ async def on_message(message: cl.Message):
         
         # Stream response
         full_response = ""
+        current_summary = cl.user_session.get("current_summary")
         with client.messages.stream(
             model=CLAUDE_MODEL,
             max_tokens=2048,
-            system=CHAT_SYSTEM,
+            system=build_system_prompt(current_summary),
             messages=api_messages
         ) as stream:
             for text in stream.text_stream:
@@ -379,6 +416,11 @@ async def on_message(message: cl.Message):
         
         await response_msg.update()
         
+        # Update current summary state if a summary was found
+        extracted = extract_summary_from_response(full_response)
+        if extracted:
+            cl.user_session.set("current_summary", extracted)
+
         # Add assistant response to history and cap to prevent context overflow
         history.append({"role": "assistant", "content": full_response})
         if len(history) > MAX_HISTORY_MESSAGES:
@@ -455,10 +497,18 @@ async def on_chat_resume(thread: ThreadDict):
             messages = msg_repo.get_thread_messages(thread_id)
             
             cl.user_session.set("thread_id", thread_id)
-            
+
             history = [{"role": msg.role, "content": msg.content} for msg in messages]
             cl.user_session.set("message_history", history)
-            
+
+            # Restore summary state from last assistant message
+            for msg in reversed(history):
+                if msg["role"] == "assistant":
+                    extracted = extract_summary_from_response(msg["content"])
+                    if extracted:
+                        cl.user_session.set("current_summary", extracted)
+                        break
+
         except Exception as e:
             logger.error(f"Failed to resume chat: {e}")
         finally:

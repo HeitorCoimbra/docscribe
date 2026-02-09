@@ -147,9 +147,91 @@ class Message(Base):
 # DATABASE OPERATIONS
 # =============================================================================
 
+# Chainlit's built-in data layer expects PascalCase tables ("User", "Thread", etc.)
+# These do NOT collide with our lowercase custom tables (users, threads, messages).
+CHAINLIT_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS "User" (
+    "id" UUID PRIMARY KEY,
+    "identifier" TEXT NOT NULL UNIQUE,
+    "metadata" JSONB NOT NULL DEFAULT '{}'::jsonb,
+    "createdAt" TEXT
+);
+
+CREATE TABLE IF NOT EXISTS "Thread" (
+    "id" UUID PRIMARY KEY,
+    "createdAt" TEXT,
+    "name" TEXT,
+    "userId" UUID,
+    "userIdentifier" TEXT,
+    "tags" TEXT[],
+    "metadata" JSONB,
+    FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "Step" (
+    "id" UUID PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "threadId" UUID NOT NULL,
+    "parentId" UUID,
+    "streaming" BOOLEAN NOT NULL DEFAULT FALSE,
+    "waitForAnswer" BOOLEAN,
+    "isError" BOOLEAN,
+    "metadata" JSONB,
+    "tags" TEXT[],
+    "input" TEXT,
+    "output" TEXT,
+    "createdAt" TEXT,
+    "start" TEXT,
+    "end" TEXT,
+    "generation" JSONB,
+    "showInput" TEXT,
+    "language" TEXT,
+    "indent" INT,
+    FOREIGN KEY ("threadId") REFERENCES "Thread"("id") ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "Element" (
+    "id" UUID PRIMARY KEY,
+    "threadId" UUID,
+    "type" TEXT,
+    "url" TEXT,
+    "chainlitKey" TEXT,
+    "name" TEXT NOT NULL,
+    "display" TEXT,
+    "objectKey" TEXT,
+    "size" TEXT,
+    "page" INT,
+    "language" TEXT,
+    "forId" UUID,
+    "mime" TEXT,
+    "props" JSONB,
+    FOREIGN KEY ("threadId") REFERENCES "Thread"("id") ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "Feedback" (
+    "id" UUID PRIMARY KEY,
+    "forId" UUID NOT NULL,
+    "threadId" UUID NOT NULL,
+    "value" INT NOT NULL,
+    "comment" TEXT,
+    FOREIGN KEY ("threadId") REFERENCES "Thread"("id") ON DELETE CASCADE
+);
+"""
+
+
 def init_db():
-    """Initialize database tables."""
-    Base.metadata.create_all(bind=get_engine())
+    """Initialize database tables (both custom and Chainlit data layer)."""
+    from sqlalchemy import text
+
+    engine = get_engine()
+    # Create our custom tables
+    Base.metadata.create_all(bind=engine)
+
+    # Create Chainlit's PascalCase tables for its built-in data layer (sidebar)
+    with engine.connect() as conn:
+        conn.execute(text(CHAINLIT_TABLES_SQL))
+        conn.commit()
 
 
 def get_db():

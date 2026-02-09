@@ -191,10 +191,10 @@ def transcribe_audio(
         file=(filename, audio_bytes),
         model=WHISPER_MODEL,
         temperature=0,
-        response_format="verbose_json",
+        response_format="json",
     )
-    
-    # Replace Unicode line/paragraph separators that cause encoding issues
+
+    # Sanitize Unicode line/paragraph separators
     text = transcription.text
     text = text.replace("\u2028", "\n").replace("\u2029", "\n")
     return text

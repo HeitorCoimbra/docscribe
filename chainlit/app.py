@@ -17,6 +17,12 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+# Force UTF-8 for stdout/stderr in containers with ASCII locale
+if sys.stdout.encoding != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr.encoding != "utf-8":
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Ensure the app directory is in sys.path so lazy imports (database, core)
 # work correctly when Chainlit loads the module via importlib.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

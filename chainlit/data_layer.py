@@ -351,10 +351,24 @@ class DocScribeDataLayer(BaseDataLayer):
             pool = await self._get_pool()
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    'SELECT "userIdentifier" FROM "Thread" WHERE "id" = $1',
+                    'SELECT "userId", "userIdentifier" FROM "Thread" WHERE "id" = $1',
                     self._safe_uuid(thread_id),
                 )
-            return (row["userIdentifier"] if row and row["userIdentifier"] else "")
+            if not row:
+                return ""
+            # Primary: use userIdentifier directly
+            if row["userIdentifier"]:
+                return row["userIdentifier"]
+            # Fallback: resolve identifier from PascalCase User table via userId
+            if row["userId"]:
+                async with pool.acquire() as conn:
+                    user_row = await conn.fetchrow(
+                        'SELECT "identifier" FROM "User" WHERE "id" = $1',
+                        row["userId"],
+                    )
+                if user_row and user_row["identifier"]:
+                    return user_row["identifier"]
+            return ""
         except Exception:
             logger.error(f"get_thread_author error:\n{traceback.format_exc()}")
             return ""

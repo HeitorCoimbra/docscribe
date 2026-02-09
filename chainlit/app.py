@@ -393,6 +393,12 @@ async def process_audio_and_transcribe(
 # AUDIO RECORDING HANDLERS
 # =============================================================================
 
+@cl.on_audio_start
+async def on_audio_start():
+    """Allow audio recording to begin."""
+    return True
+
+
 @cl.on_audio_chunk
 async def on_audio_chunk(chunk: cl.InputAudioChunk):
     """Collect audio chunks during recording."""

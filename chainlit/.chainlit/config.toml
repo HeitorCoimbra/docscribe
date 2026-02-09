@@ -1,0 +1,10 @@
+[features]
+# Enable microphone recording button in the UI.
+
+[features.audio]
+enabled = true
+sample_rate = 24000
+
+[features.spontaneous_file_upload]
+enabled = true
+accept = ["audio/*"]

@@ -289,14 +289,128 @@ async def on_chat_start():
 Sou seu assistente para criar sumários de pacientes de UTI.
 
 **Como usar:**
-1. 📎 Faça upload de um áudio de passagem de plantão
-2. 💬 Ou cole a transcrição diretamente no chat
-3. ✏️ Corrija ou adicione informações conforme necessário
-4. ✅ Confirme para salvar o sumário
+1. 🎤 **Grave um áudio** usando o botão de microfone
+2. 📎 Ou faça upload de um arquivo de áudio
+3. 💬 Ou cole a transcrição diretamente no chat
+4. ✏️ Corrija ou adicione informações conforme necessário
+5. ✅ Confirme para salvar o sumário
 
 *Dica: Você pode enviar múltiplos áudios e eu consolidarei as informações.*
 """
     ).send()
+
+
+# =============================================================================
+# AUDIO PROCESSING HELPER
+# =============================================================================
+
+async def process_audio_and_transcribe(
+    audio_bytes: bytes,
+    filename: str,
+    source_label: str = "áudio"
+) -> Optional[str]:
+    """
+    Process audio bytes, transcribe it, and display the result.
+    Returns the transcription text if successful, None otherwise.
+    """
+    processing_msg = cl.Message(content=f"🎤 Transcrevendo {source_label}...")
+    await processing_msg.send()
+    
+    try:
+        # Transcribe with Groq Whisper
+        if not GROQ_API_KEY:
+            raise ValueError("GROQ_API_KEY não configurada")
+        
+        transcription = transcribe_audio(
+            audio_bytes=audio_bytes,
+            filename=filename,
+            groq_api_key=GROQ_API_KEY
+        )
+        
+        await processing_msg.remove()
+        
+        # Display transcription in expandable accordion
+        transcription_element = cl.CustomElement(
+            name="TranscriptionAccordion",
+            props={
+                "transcription": transcription,
+                "characterCount": len(transcription)
+            }
+        )
+        await cl.Message(
+            content=f"✅ **{source_label.capitalize()} transcrito:**",
+            elements=[transcription_element]
+        ).send()
+        
+        return transcription
+        
+    except Exception as e:
+        import traceback
+        logger.error(f"Transcription error:\n{traceback.format_exc()}")
+        await processing_msg.remove()
+        await cl.Message(content=f"❌ Erro na transcrição do {source_label}: {str(e)}").send()
+        return None
+
+
+# =============================================================================
+# AUDIO RECORDING HANDLERS
+# =============================================================================
+
+@cl.on_audio_chunk
+async def on_audio_chunk(chunk: cl.InputAudioChunk):
+    """Collect audio chunks during recording."""
+    if chunk.isStart:
+        # Initialize audio buffer for new recording
+        cl.user_session.set("audio_chunks", [])
+        cl.user_session.set("audio_mime", chunk.mime)
+    
+    # Collect chunk data
+    chunks = cl.user_session.get("audio_chunks", [])
+    chunks.append(chunk.chunk)
+    cl.user_session.set("audio_chunks", chunks)
+
+
+@cl.on_audio_end
+async def on_audio_end():
+    """Process complete audio recording and transcribe it."""
+    chunks = cl.user_session.get("audio_chunks", [])
+    mime = cl.user_session.get("audio_mime", "audio/webm")
+    
+    if not chunks:
+        await cl.Message(content="❌ Nenhum áudio foi gravado.").send()
+        return
+    
+    # Combine all chunks into single audio bytes
+    audio_bytes = b"".join(chunks)
+    
+    # Clear chunks from session
+    cl.user_session.set("audio_chunks", None)
+    cl.user_session.set("audio_mime", None)
+    
+    # Determine file extension from MIME type
+    mime_to_ext = {
+        "audio/webm": ".webm",
+        "audio/ogg": ".ogg",
+        "audio/wav": ".wav",
+        "audio/mp3": ".mp3",
+        "audio/m4a": ".m4a",
+    }
+    ext = mime_to_ext.get(mime, ".webm")
+    filename = f"recorded_audio{ext}"
+    
+    # Process the recorded audio
+    transcription = await process_audio_and_transcribe(
+        audio_bytes=audio_bytes,
+        filename=filename,
+        source_label="áudio gravado"
+    )
+    
+    if transcription:
+        # Process the transcription as if it came from a message
+        synthetic_message = cl.Message(
+            content=f"[Transcrição do áudio gravado]\n\n{transcription}"
+        )
+        await on_message(synthetic_message)
 
 
 # =============================================================================
@@ -327,50 +441,26 @@ async def on_message(message: cl.Message):
     if audio_files:
         audio_file = audio_files[0]
         
-        processing_msg = cl.Message(content="🎤 Transcrevendo áudio...")
-        await processing_msg.send()
+        # Read audio bytes
+        if hasattr(audio_file, 'content') and audio_file.content:
+            audio_bytes = audio_file.content
+        elif hasattr(audio_file, 'path') and audio_file.path:
+            with open(audio_file.path, 'rb') as f:
+                audio_bytes = f.read()
+        else:
+            await cl.Message(content="❌ Não foi possível ler o arquivo de áudio.").send()
+            return
         
-        try:
-            # Read audio bytes
-            if hasattr(audio_file, 'content') and audio_file.content:
-                audio_bytes = audio_file.content
-            elif hasattr(audio_file, 'path') and audio_file.path:
-                with open(audio_file.path, 'rb') as f:
-                    audio_bytes = f.read()
-            else:
-                raise ValueError("Não foi possível ler o arquivo de áudio")
-            
-            # Transcribe with Groq Whisper
-            if not GROQ_API_KEY:
-                raise ValueError("GROQ_API_KEY não configurada")
-            
-            transcription = transcribe_audio(
-                audio_bytes=audio_bytes,
-                filename=audio_file.name or "audio.mp3",
-                groq_api_key=GROQ_API_KEY
-            )
-            
+        # Process and transcribe audio
+        transcription = await process_audio_and_transcribe(
+            audio_bytes=audio_bytes,
+            filename=audio_file.name or "audio.mp3",
+            source_label="áudio"
+        )
+        
+        if transcription:
             user_content = f"[Transcrição do áudio]\n\n{transcription}"
-            
-            await processing_msg.remove()
-            # Display transcription in expandable accordion
-            transcription_element = cl.CustomElement(
-                name="TranscriptionAccordion",
-                props={
-                    "transcription": transcription,
-                    "characterCount": len(transcription)
-                }
-            )
-            await cl.Message(
-                content="✅ **Áudio transcrito:**",
-                elements=[transcription_element]
-            ).send()
-            
-        except Exception as e:
-            import traceback
-            logger.error(f"Transcription error:\n{traceback.format_exc()}")
-            await processing_msg.remove()
-            await cl.Message(content=f"❌ Erro na transcrição: {str(e)}").send()
+        else:
             return
     
     if not user_content.strip():

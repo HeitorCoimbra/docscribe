@@ -28,4 +28,4 @@ EXPOSE 8000
 # Chainlit serves on root path which returns HTML
 
 # Run Chainlit
-CMD ["sh", "-c", "chainlit run app.py --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "chainlit run app.py --host 0.0.0.0 --port ${PORT:-8000} --headless"]

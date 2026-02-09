@@ -1,0 +1,13 @@
+[project]
+enable_telemetry = false
+
+[features]
+multi_modal = true
+unsafe_allow_html = false
+latex = false
+
+[UI]
+name = "DocScribe"
+description = "Assistente para sumários de pacientes de UTI"
+default_collapse_content = true
+hide_cot = false

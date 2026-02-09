@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 DATABASE_URL = os.environ.get("DATABASE_URL")
+MAX_HISTORY_MESSAGES = 50
 
 # Log configuration status
 logger.info(f"GROQ_API_KEY configured: {bool(GROQ_API_KEY)}")
@@ -122,51 +123,63 @@ E pergunte se o usuário deseja salvar o sumário.
 # OAUTH AUTHENTICATION
 # =============================================================================
 
-@cl.oauth_callback
-def oauth_callback(
-    provider_id: str,
-    token: str,
-    raw_user_data: dict,
-    default_user: cl.User,
-) -> Optional[cl.User]:
-    """Handle OAuth callback and create/update user in database."""
-    email = raw_user_data.get("email")
-    name = raw_user_data.get("name") or raw_user_data.get("login")
-    avatar = raw_user_data.get("picture") or raw_user_data.get("avatar_url")
-    
-    if not email:
-        logger.warning("OAuth callback: no email provided")
-        return default_user
-    
-    user_id = email  # Default to email as ID
-    
-    # Try to save to database if available
-    db = get_db_session()
-    if db:
-        try:
-            from database import UserRepository
-            user_repo = UserRepository(db)
-            db_user = user_repo.get_or_create_user(
-                email=email,
-                name=name,
-                avatar_url=avatar,
-                provider=provider_id
-            )
-            user_id = db_user.id
-        except Exception as e:
-            logger.error(f"Database error in oauth_callback: {e}")
-        finally:
-            db.close()
-    
-    return cl.User(
-        identifier=user_id,
-        metadata={
-            "email": email,
-            "name": name,
-            "avatar": avatar,
-            "provider": provider_id
-        }
-    )
+# Check if any OAuth provider is configured
+_has_oauth = any(
+    os.environ.get(var)
+    for var in [
+        "OAUTH_GOOGLE_CLIENT_ID",
+        "OAUTH_GITHUB_CLIENT_ID",
+    ]
+)
+
+if _has_oauth:
+    @cl.oauth_callback
+    def oauth_callback(
+        provider_id: str,
+        token: str,
+        raw_user_data: dict,
+        default_user: cl.User,
+    ) -> Optional[cl.User]:
+        """Handle OAuth callback and create/update user in database."""
+        email = raw_user_data.get("email")
+        name = raw_user_data.get("name") or raw_user_data.get("login")
+        avatar = raw_user_data.get("picture") or raw_user_data.get("avatar_url")
+
+        if not email:
+            logger.warning("OAuth callback: no email provided")
+            return default_user
+
+        user_id = email  # Default to email as ID
+
+        # Try to save to database if available
+        db = get_db_session()
+        if db:
+            try:
+                from database import UserRepository
+                user_repo = UserRepository(db)
+                db_user = user_repo.get_or_create_user(
+                    email=email,
+                    name=name,
+                    avatar_url=avatar,
+                    provider=provider_id
+                )
+                user_id = db_user.id
+            except Exception as e:
+                logger.error(f"Database error in oauth_callback: {e}")
+            finally:
+                db.close()
+
+        return cl.User(
+            identifier=user_id,
+            metadata={
+                "email": email,
+                "name": name,
+                "avatar": avatar,
+                "provider": provider_id
+            }
+        )
+else:
+    logger.warning("No OAuth provider configured — running without authentication")
 
 
 # =============================================================================
@@ -333,8 +346,10 @@ async def on_message(message: cl.Message):
         
         await response_msg.update()
         
-        # Add assistant response to history
+        # Add assistant response to history and cap to prevent context overflow
         history.append({"role": "assistant", "content": full_response})
+        if len(history) > MAX_HISTORY_MESSAGES:
+            history = history[-MAX_HISTORY_MESSAGES:]
         cl.user_session.set("message_history", history)
         
         # Save assistant message to database

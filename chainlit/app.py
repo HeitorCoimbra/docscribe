@@ -149,20 +149,20 @@ voce DEVE SEMPRE responder IMEDIATAMENTE com o sumario estruturado abaixo.
 NAO faca perguntas antes de mostrar o sumario. NAO peca confirmacao antes de mostrar o sumario.
 
 Para campos que NAO podem ser preenchidos com base na transcricao, use exatamente:
-PENDENTE
+🔴 PENDENTE
 
 FORMATO OBRIGATORIO DE RESPOSTA:
 
 **Leito [X] - [Nome do Paciente]**
 
 **Diagnosticos:**
-1. [diagnostico extraido ou PENDENTE]
+1. [diagnostico extraido ou 🔴 PENDENTE]
 
 **Pendencias:**
-1. [pendencia extraida ou PENDENTE]
+1. [pendencia extraida ou 🔴 PENDENTE]
 
 **Condutas:**
-- [conduta com verbo no infinitivo ou PENDENTE]
+- [conduta com verbo no infinitivo ou 🔴 PENDENTE]
 
 ---
 Deseja corrigir ou adicionar algo?

@@ -353,8 +353,16 @@ async def on_message(message: cl.Message):
             user_content = f"[Transcrição do áudio]\n\n{transcription}"
             
             await processing_msg.remove()
-            preview = transcription[:500] + "..." if len(transcription) > 500 else transcription
-            await cl.Message(content=f"✅ **Áudio transcrito:**\n\n_{preview}_").send()
+            # Create expandable transcription section
+            transcription_html = f"""✅ **Áudio transcrito:**
+
+<details>
+<summary><strong>📝 Ver transcrição completa ({len(transcription)} caracteres)</strong></summary>
+
+{transcription}
+
+</details>"""
+            await cl.Message(content=transcription_html).send()
             
         except Exception as e:
             import traceback

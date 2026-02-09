@@ -38,8 +38,17 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+def _clean_key(val: str | None) -> str | None:
+    """Remove invisible Unicode chars that sneak in from copy-paste."""
+    if not val:
+        return None
+    # Remove common invisible characters: line/paragraph separators, ZWS, BOM, etc.
+    for ch in "\u2028\u2029\u200b\ufeff\u00a0":
+        val = val.replace(ch, "")
+    return val.strip() or None
+
+GROQ_API_KEY = _clean_key(os.environ.get("GROQ_API_KEY"))
+ANTHROPIC_API_KEY = _clean_key(os.environ.get("ANTHROPIC_API_KEY"))
 DATABASE_URL = os.environ.get("DOCSCRIBE_DB_URL", os.environ.get("DATABASE_URL"))
 MAX_HISTORY_MESSAGES = 50
 

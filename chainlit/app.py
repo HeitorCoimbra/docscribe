@@ -34,6 +34,17 @@ from chainlit.types import ThreadDict
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Enable audio recording and file upload in Chainlit config
+# (auto-generated config.toml has these disabled by default)
+try:
+    from chainlit.config import config as chainlit_config
+    chainlit_config.features.audio.enabled = True
+    chainlit_config.features.audio.sample_rate = 24000
+    chainlit_config.features.spontaneous_file_upload.enabled = True
+    chainlit_config.features.spontaneous_file_upload.accept = ["audio/*"]
+except Exception as e:
+    logger.warning(f"Could not configure audio/upload features: {e}")
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -291,10 +302,23 @@ async def on_chat_start():
             finally:
                 db.close()
 
+    # Ensure thread is registered in data layer with user info (for sidebar)
+    if user:
+        try:
+            import chainlit.data as cl_data
+            if cl_data._data_layer:
+                await cl_data._data_layer.update_thread(
+                    thread_id=thread_id,
+                    user_id=user.identifier,
+                    name="Nova Sessão",
+                )
+        except Exception as e:
+            logger.error(f"Failed to register thread in data layer: {e}")
+
     cl.user_session.set("thread_id", thread_id)
     cl.user_session.set("message_history", [])
     cl.user_session.set("current_summary", None)
-    
+
     # Welcome message
     await cl.Message(
         content="""👋 **Bem-vindo ao DocScribe!**

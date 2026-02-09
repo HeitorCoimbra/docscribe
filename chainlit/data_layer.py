@@ -22,7 +22,11 @@ from chainlit.types import (
     ThreadDict,
     ThreadFilter,
 )
-from chainlit.user import PersistedUser
+
+try:
+    from chainlit.user import PersistedUser
+except ImportError:
+    from chainlit.types import PersistedUser  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 

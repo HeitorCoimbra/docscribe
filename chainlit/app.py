@@ -10,11 +10,16 @@ Features:
 """
 
 import os
+import sys
 import json
 import logging
 import uuid
 from datetime import datetime
 from typing import Optional
+
+# Ensure the app directory is in sys.path so lazy imports (database, core)
+# work correctly when Chainlit loads the module via importlib.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import chainlit as cl
 from chainlit.types import ThreadDict

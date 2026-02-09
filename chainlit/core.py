@@ -12,10 +12,6 @@ Contains:
 - Analysis function (Anthropic)
 """
 
-import json
-import os
-import tempfile
-from typing import Optional
 from pydantic import BaseModel, Field
 
 
@@ -199,78 +195,3 @@ def transcribe_audio(
     )
     
     return transcription.text
-
-
-# =============================================================================
-# TEXT ANALYSIS (ANTHROPIC CLAUDE)
-# =============================================================================
-
-def analyze_transcription(
-    transcription: str,
-    anthropic_api_key: str
-) -> SumarioPaciente:
-    """
-    Analisa a transcrição e extrai o sumário estruturado usando Claude.
-    
-    Args:
-        transcription: Texto transcrito do áudio
-        anthropic_api_key: Anthropic API Key
-    
-    Returns:
-        SumarioPaciente com os dados extraídos
-    """
-    from langchain_anthropic import ChatAnthropic
-    from langchain_core.prompts import ChatPromptTemplate
-    
-    # Initialize Claude
-    llm = ChatAnthropic(
-        model=CLAUDE_MODEL,
-        api_key=anthropic_api_key,
-        temperature=0
-    )
-    
-    # Configure for structured output
-    structured_llm = llm.with_structured_output(SumarioPaciente)
-    
-    # Create prompt
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT),
-        ("human", HUMAN_PROMPT_TEMPLATE)
-    ])
-    
-    # Create chain and invoke
-    chain = prompt | structured_llm
-    result = chain.invoke({"transcription": transcription})
-    
-    return result
-
-
-# =============================================================================
-# MAIN PROCESSING FUNCTION
-# =============================================================================
-
-def process_audio(
-    audio_bytes: bytes,
-    filename: str,
-    groq_api_key: str,
-    anthropic_api_key: str
-) -> tuple[str, SumarioPaciente]:
-    """
-    Processa áudio: transcrição (Groq) + análise (Claude).
-    
-    Args:
-        audio_bytes: Conteúdo do arquivo de áudio em bytes
-        filename: Nome do arquivo
-        groq_api_key: Groq API Key
-        anthropic_api_key: Anthropic API Key
-    
-    Returns:
-        Tuple of (transcription_text, SumarioPaciente)
-    """
-    # Step 1: Transcribe with Groq Whisper
-    transcription = transcribe_audio(audio_bytes, filename, groq_api_key)
-    
-    # Step 2: Analyze with Claude
-    sumario = analyze_transcription(transcription, anthropic_api_key)
-    
-    return transcription, sumario

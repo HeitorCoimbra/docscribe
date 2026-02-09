@@ -312,6 +312,8 @@ async def on_message(message: cl.Message):
             await cl.Message(content=f"✅ **Áudio transcrito:**\n\n_{preview}_").send()
             
         except Exception as e:
+            import traceback
+            logger.error(f"Transcription error:\n{traceback.format_exc()}")
             await processing_msg.remove()
             await cl.Message(content=f"❌ Erro na transcrição: {str(e)}").send()
             return

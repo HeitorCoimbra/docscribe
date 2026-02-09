@@ -167,31 +167,35 @@ CLAUDE_MODEL = "claude-sonnet-4-5-20250929"  # Claude Sonnet 4
 # =============================================================================
 
 def transcribe_audio(
-    audio_bytes: bytes, 
-    filename: str, 
+    audio_bytes: bytes,
+    filename: str,
     groq_api_key: str
 ) -> str:
     """
     Transcreve áudio usando Groq Whisper.
-    
+
     Args:
         audio_bytes: Conteúdo do arquivo de áudio em bytes
         filename: Nome do arquivo (para detectar extensão)
         groq_api_key: Groq API Key
-    
+
     Returns:
         Texto transcrito
     """
+    import io
     from groq import Groq
-    
+
     client = Groq(api_key=groq_api_key)
-    
-    # Groq accepts file tuple: (filename, bytes)
+
+    # Use BytesIO with a name attribute — avoids encoding issues
+    # that can occur with the (filename, bytes) tuple format in httpx
+    file_obj = io.BytesIO(audio_bytes)
+    file_obj.name = filename
+
     transcription = client.audio.transcriptions.create(
-        file=(filename, audio_bytes),
+        file=file_obj,
         model=WHISPER_MODEL,
         temperature=0,
-        response_format="json",
     )
 
     # Sanitize Unicode line/paragraph separators

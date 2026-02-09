@@ -31,9 +31,11 @@ def _utcnow():
 
 
 # Database URL from environment
+# Uses DOCSCRIBE_DB_URL to avoid conflict with Chainlit's built-in data layer
+# which auto-detects DATABASE_URL and expects its own table schema.
 DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/docscribe"
+    "DOCSCRIBE_DB_URL",
+    os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/docscribe")
 )
 
 # Fix for Railway PostgreSQL URL format

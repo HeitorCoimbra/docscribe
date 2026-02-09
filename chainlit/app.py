@@ -29,13 +29,13 @@ logger = logging.getLogger(__name__)
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = os.environ.get("DOCSCRIBE_DB_URL", os.environ.get("DATABASE_URL"))
 MAX_HISTORY_MESSAGES = 50
 
 # Log configuration status
 logger.info(f"GROQ_API_KEY configured: {bool(GROQ_API_KEY)}")
 logger.info(f"ANTHROPIC_API_KEY configured: {bool(ANTHROPIC_API_KEY)}")
-logger.info(f"DATABASE_URL configured: {bool(DATABASE_URL)}")
+logger.info(f"DOCSCRIBE_DB_URL configured: {bool(DATABASE_URL)}")
 
 # =============================================================================
 # LAZY INITIALIZATION

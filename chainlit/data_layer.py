@@ -96,6 +96,21 @@ class DocScribeDataLayer(BaseDataLayer):
         except (ValueError, AttributeError):
             return None
 
+    async def _resolve_custom_user_email(self, user_id: uuid.UUID) -> Optional[str]:
+        """Resolve legacy user UUID from custom users table to email."""
+        try:
+            pool = await self._get_pool()
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    'SELECT "email" FROM "users" WHERE "id" = $1',
+                    str(user_id),
+                )
+            if row and row.get("email"):
+                return row["email"]
+        except Exception:
+            logger.error(f"_resolve_custom_user_email error:\n{traceback.format_exc()}")
+        return None
+
     # ── User ─────────────────────────────────────────────────────────
 
     async def get_user(self, identifier: str) -> Optional[PersistedUser]:
@@ -356,8 +371,14 @@ class DocScribeDataLayer(BaseDataLayer):
                 )
             if not row:
                 return ""
-            # Primary: use userIdentifier directly
+            # Primary: use userIdentifier directly (email)
             if row["userIdentifier"]:
+                # If legacy UUID was stored, resolve to email from custom users table
+                legacy_uuid = self._safe_uuid(row["userIdentifier"])
+                if legacy_uuid:
+                    resolved = await self._resolve_custom_user_email(legacy_uuid)
+                    if resolved:
+                        return resolved
                 return row["userIdentifier"]
             # Fallback: resolve identifier from PascalCase User table via userId
             if row["userId"]:
@@ -495,7 +516,18 @@ class DocScribeDataLayer(BaseDataLayer):
         pool = await self._get_pool()
         tid = self._safe_uuid(thread_id)
         if not tid:
-            return None
+            # Return a minimal thread object for invalid IDs
+            return {
+                "id": str(thread_id),
+                "createdAt": self._now_iso(),
+                "name": "Sessão",
+                "userId": None,
+                "userIdentifier": None,
+                "tags": None,
+                "metadata": {},
+                "steps": [],
+                "elements": [],
+            }
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow(

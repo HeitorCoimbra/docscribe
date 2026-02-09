@@ -204,10 +204,21 @@ async def on_chat_start():
         db = get_db_session()
         if db:
             try:
-                from database import ThreadRepository
+                from database import ThreadRepository, UserRepository
+                # Ensure user exists in DB and get their DB id.
+                # OAuth callback may have failed to save, so user.identifier
+                # could be an email instead of a UUID.
+                user_repo = UserRepository(db)
+                metadata = user.metadata or {}
+                db_user = user_repo.get_or_create_user(
+                    email=metadata.get("email", user.identifier),
+                    name=metadata.get("name"),
+                    avatar_url=metadata.get("avatar"),
+                    provider=metadata.get("provider"),
+                )
                 thread_repo = ThreadRepository(db)
                 thread = thread_repo.create_thread(
-                    user_id=user.identifier,
+                    user_id=db_user.id,
                     title="Nova Sessão"
                 )
                 thread_id = thread.id

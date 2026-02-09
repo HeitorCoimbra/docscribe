@@ -228,10 +228,12 @@ if _has_oauth:
             logger.warning("OAuth callback: no email provided")
             return default_user
 
-        user_id = email  # Default to email as ID
+        # Use a stable identifier (email) for Chainlit auth/data layer
+        stable_identifier = email
 
         # Try to save to database if available
         db = get_db_session()
+        db_user_id = None
         if db:
             try:
                 from database import UserRepository
@@ -242,19 +244,20 @@ if _has_oauth:
                     avatar_url=avatar,
                     provider=provider_id
                 )
-                user_id = db_user.id
+                db_user_id = db_user.id
             except Exception as e:
                 logger.error(f"Database error in oauth_callback: {e}")
             finally:
                 db.close()
 
         return cl.User(
-            identifier=user_id,
+            identifier=stable_identifier,
             metadata={
                 "email": email,
                 "name": name,
                 "avatar": avatar,
-                "provider": provider_id
+                "provider": provider_id,
+                "db_user_id": db_user_id,
             }
         )
 else:
@@ -664,50 +667,61 @@ async def update_thread_title(db, thread_id: str, response: str):
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
     """Resume a previous chat session from sidebar."""
-    thread_id = thread.get("id")
+    try:
+        if isinstance(thread, dict):
+            thread_id = thread.get("id")
+            steps = thread.get("steps") or []
+        else:
+            thread_id = getattr(thread, "id", None)
+            steps = getattr(thread, "steps", []) or []
 
-    if not thread_id:
-        return
+        if not thread_id:
+            return
 
-    cl.user_session.set("thread_id", thread_id)
-    cl.user_session.set("current_summary", None)
+        cl.user_session.set("thread_id", thread_id)
+        cl.user_session.set("current_summary", None)
 
-    # Reconstruct message history from data layer steps
-    history: list[dict] = []
-    for step in thread.get("steps", []):
-        step_type = step.get("type", "")
-        if step_type == "user_message":
-            content = step.get("output") or step.get("input") or ""
-            if content:
-                history.append({"role": "user", "content": content})
-        elif step_type in ("assistant_message", "run"):
-            content = step.get("output", "")
-            if content:
-                history.append({"role": "assistant", "content": content})
+        # Reconstruct message history from data layer steps
+        history: list[dict] = []
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            step_type = step.get("type", "")
+            if step_type == "user_message":
+                content = step.get("output") or step.get("input") or ""
+                if content:
+                    history.append({"role": "user", "content": content})
+            elif step_type in ("assistant_message", "run"):
+                content = step.get("output", "")
+                if content:
+                    history.append({"role": "assistant", "content": content})
 
-    # Fall back to custom messages table if no steps found
-    if not history:
-        db = get_db_session()
-        if db:
-            try:
-                from database import MessageRepository
-                msg_repo = MessageRepository(db)
-                messages = msg_repo.get_thread_messages(thread_id)
-                history = [
-                    {"role": msg.role, "content": msg.content}
-                    for msg in messages
-                ]
-            except Exception as e:
-                logger.error(f"Failed to load messages from DB: {e}")
-            finally:
-                db.close()
+        # Fall back to custom messages table if no steps found
+        if not history:
+            db = get_db_session()
+            if db:
+                try:
+                    from database import MessageRepository
+                    msg_repo = MessageRepository(db)
+                    messages = msg_repo.get_thread_messages(thread_id)
+                    history = [
+                        {"role": msg.role, "content": msg.content}
+                        for msg in messages
+                    ]
+                except Exception as e:
+                    logger.error(f"Failed to load messages from DB: {e}")
+                finally:
+                    db.close()
 
-    cl.user_session.set("message_history", history)
+        cl.user_session.set("message_history", history)
 
-    # Restore summary state from last assistant message
-    for msg in reversed(history):
-        if msg["role"] == "assistant":
-            extracted = extract_summary_from_response(msg["content"])
-            if extracted:
-                cl.user_session.set("current_summary", extracted)
-                break
+        # Restore summary state from last assistant message
+        for msg in reversed(history):
+            if msg.get("role") == "assistant":
+                extracted = extract_summary_from_response(msg.get("content", ""))
+                if extracted:
+                    cl.user_session.set("current_summary", extracted)
+                    break
+    except Exception as e:
+        logger.error(f"Failed to resume chat: {e}")
+        await cl.Message(content="❌ Não foi possível carregar esta conversa.").send()

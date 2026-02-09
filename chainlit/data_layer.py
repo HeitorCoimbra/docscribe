@@ -507,7 +507,18 @@ class DocScribeDataLayer(BaseDataLayer):
                 tid,
             )
         if not row:
-            return None
+            # Return a minimal thread object instead of failing hard
+            return {
+                "id": str(tid),
+                "createdAt": self._now_iso(),
+                "name": "Sessão",
+                "userId": None,
+                "userIdentifier": None,
+                "tags": None,
+                "metadata": {},
+                "steps": [],
+                "elements": [],
+            }
 
         async with pool.acquire() as conn:
             step_rows = await conn.fetch(

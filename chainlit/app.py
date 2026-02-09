@@ -103,6 +103,16 @@ def get_db_session():
 # before its first query (which happens during authentication).
 ensure_db()
 
+# Register Chainlit data layer for sidebar history
+if DATABASE_URL:
+    try:
+        import chainlit.data as cl_data
+        from data_layer import DocScribeDataLayer
+        cl_data._data_layer = DocScribeDataLayer(conninfo=DATABASE_URL)
+        logger.info("Chainlit data layer registered for sidebar history")
+    except Exception as e:
+        logger.warning(f"Could not register data layer (sidebar history disabled): {e}")
+
 
 # =============================================================================
 # IMPORT CORE MODULE
@@ -246,19 +256,22 @@ else:
 async def on_chat_start():
     """Initialize new chat session."""
     user = cl.user_session.get("user")
-    
-    # Generate thread ID
-    thread_id = str(uuid.uuid4())
-    
-    # Try to create thread in database
+
+    # Get thread ID from Chainlit context (set by data layer) or generate one
+    thread_id = None
+    try:
+        thread_id = cl.context.session.thread_id
+    except (AttributeError, RuntimeError):
+        pass
+    if not thread_id:
+        thread_id = str(uuid.uuid4())
+
+    # Try to create thread in custom database table for domain-specific data
     if user:
         db = get_db_session()
         if db:
             try:
                 from database import ThreadRepository, UserRepository
-                # Ensure user exists in DB and get their DB id.
-                # OAuth callback may have failed to save, so user.identifier
-                # could be an email instead of a UUID.
                 user_repo = UserRepository(db)
                 metadata = user.metadata or {}
                 db_user = user_repo.get_or_create_user(
@@ -268,16 +281,16 @@ async def on_chat_start():
                     provider=metadata.get("provider"),
                 )
                 thread_repo = ThreadRepository(db)
-                thread = thread_repo.create_thread(
+                thread_repo.create_thread_with_id(
+                    thread_id=thread_id,
                     user_id=db_user.id,
                     title="Nova Sessão"
                 )
-                thread_id = thread.id
             except Exception as e:
                 logger.error(f"Failed to create thread in DB: {e}")
             finally:
                 db.close()
-    
+
     cl.user_session.set("thread_id", thread_id)
     cl.user_session.set("message_history", [])
     cl.user_session.set("current_summary", None)
@@ -555,26 +568,39 @@ async def on_message(message: cl.Message):
 async def update_thread_title(db, thread_id: str, response: str):
     """Try to extract Leito and patient name from response to update thread title."""
     import re
-    
+
     # Look for patterns like "Leito 1 - Maria" or "**Leito 1 - Maria**"
     pattern = r"[*]*Leito\s+(\d+|[A-Za-z]+)\s*[-–]\s*([A-Za-zÀ-ú\s]+)[*]*"
     match = re.search(pattern, response, re.IGNORECASE)
-    
+
     if match:
         leito = match.group(1).strip()
         patient_name = match.group(2).strip()
-        
+
         # Clean up patient name
         patient_name = re.sub(r'[*\n].*', '', patient_name).strip()
-        
+
         if leito and patient_name and len(patient_name) > 1:
+            title = f"Leito {leito} - {patient_name}"
+
+            # Update custom table
             try:
                 from database import ThreadRepository
                 thread_repo = ThreadRepository(db)
                 thread_repo.update_thread_title(thread_id, leito, patient_name)
-                logger.info(f"Updated thread title: Leito {leito} - {patient_name}")
+                logger.info(f"Updated thread title: {title}")
             except Exception as e:
                 logger.error(f"Failed to update thread title: {e}")
+
+            # Update Chainlit data layer thread name (for sidebar display)
+            try:
+                import chainlit.data as cl_data
+                if cl_data._data_layer:
+                    await cl_data._data_layer.update_thread(
+                        thread_id=thread_id, name=title
+                    )
+            except Exception as e:
+                logger.error(f"Failed to update data layer thread name: {e}")
 
 
 # =============================================================================
@@ -583,33 +609,51 @@ async def update_thread_title(db, thread_id: str, response: str):
 
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
-    """Resume a previous chat session."""
+    """Resume a previous chat session from sidebar."""
     thread_id = thread.get("id")
-    
+
     if not thread_id:
         return
-    
-    db = get_db_session()
-    if db:
-        try:
-            from database import MessageRepository
-            msg_repo = MessageRepository(db)
-            messages = msg_repo.get_thread_messages(thread_id)
-            
-            cl.user_session.set("thread_id", thread_id)
 
-            history = [{"role": msg.role, "content": msg.content} for msg in messages]
-            cl.user_session.set("message_history", history)
+    cl.user_session.set("thread_id", thread_id)
+    cl.user_session.set("current_summary", None)
 
-            # Restore summary state from last assistant message
-            for msg in reversed(history):
-                if msg["role"] == "assistant":
-                    extracted = extract_summary_from_response(msg["content"])
-                    if extracted:
-                        cl.user_session.set("current_summary", extracted)
-                        break
+    # Reconstruct message history from data layer steps
+    history: list[dict] = []
+    for step in thread.get("steps", []):
+        step_type = step.get("type", "")
+        if step_type == "user_message":
+            content = step.get("output") or step.get("input") or ""
+            if content:
+                history.append({"role": "user", "content": content})
+        elif step_type in ("assistant_message", "run"):
+            content = step.get("output", "")
+            if content:
+                history.append({"role": "assistant", "content": content})
 
-        except Exception as e:
-            logger.error(f"Failed to resume chat: {e}")
-        finally:
-            db.close()
+    # Fall back to custom messages table if no steps found
+    if not history:
+        db = get_db_session()
+        if db:
+            try:
+                from database import MessageRepository
+                msg_repo = MessageRepository(db)
+                messages = msg_repo.get_thread_messages(thread_id)
+                history = [
+                    {"role": msg.role, "content": msg.content}
+                    for msg in messages
+                ]
+            except Exception as e:
+                logger.error(f"Failed to load messages from DB: {e}")
+            finally:
+                db.close()
+
+    cl.user_session.set("message_history", history)
+
+    # Restore summary state from last assistant message
+    for msg in reversed(history):
+        if msg["role"] == "assistant":
+            extracted = extract_summary_from_response(msg["content"])
+            if extracted:
+                cl.user_session.set("current_summary", extracted)
+                break

@@ -261,6 +261,24 @@ class ThreadRepository:
         self.db.refresh(thread)
         return thread
 
+    def create_thread_with_id(
+        self, thread_id: str, user_id: str, title: str = None
+    ) -> Thread:
+        """Create a thread with a specific ID (to sync with Chainlit data layer)."""
+        existing = self.get_thread(thread_id)
+        if existing:
+            return existing
+        thread = Thread(
+            id=thread_id,
+            user_id=user_id,
+            title=title or "Nova Sessão",
+            created_date=date.today()
+        )
+        self.db.add(thread)
+        self.db.commit()
+        self.db.refresh(thread)
+        return thread
+
     def get_thread(self, thread_id: str) -> Optional[Thread]:
         """Get thread by ID."""
         return self.db.query(Thread).filter(Thread.id == thread_id).first()

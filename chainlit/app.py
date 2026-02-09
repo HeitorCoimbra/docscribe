@@ -399,11 +399,11 @@ async def on_audio_chunk(chunk: cl.InputAudioChunk):
     if chunk.isStart:
         # Initialize audio buffer for new recording
         cl.user_session.set("audio_chunks", [])
-        cl.user_session.set("audio_mime", chunk.mime)
-    
+        cl.user_session.set("audio_mime", chunk.mimeType)
+
     # Collect chunk data
     chunks = cl.user_session.get("audio_chunks", [])
-    chunks.append(chunk.chunk)
+    chunks.append(chunk.data)
     cl.user_session.set("audio_chunks", chunks)
 
 

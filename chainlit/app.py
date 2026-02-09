@@ -14,6 +14,8 @@ import sys
 import json
 import logging
 import uuid
+import io
+import wave
 from datetime import datetime
 from typing import Optional
 
@@ -389,6 +391,22 @@ async def process_audio_and_transcribe(
         return None
 
 
+def pcm_to_wav_bytes(
+    pcm_bytes: bytes,
+    sample_rate: int = 24000,
+    channels: int = 1,
+    sample_width: int = 2
+) -> bytes:
+    """Wrap raw PCM bytes into a WAV container."""
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(sample_width)
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm_bytes)
+    return buffer.getvalue()
+
+
 # =============================================================================
 # AUDIO RECORDING HANDLERS
 # =============================================================================
@@ -405,7 +423,10 @@ async def on_audio_chunk(chunk: cl.InputAudioChunk):
     if chunk.isStart:
         # Initialize audio buffer for new recording
         cl.user_session.set("audio_chunks", [])
-        cl.user_session.set("audio_mime", chunk.mimeType)
+        cl.user_session.set("audio_mime", getattr(chunk, "mimeType", None))
+        cl.user_session.set("audio_sample_rate", getattr(chunk, "sampleRate", None))
+        cl.user_session.set("audio_channels", getattr(chunk, "channels", None))
+        cl.user_session.set("audio_sample_width", getattr(chunk, "sampleWidth", None))
 
     # Collect chunk data
     chunks = cl.user_session.get("audio_chunks", [])
@@ -417,29 +438,32 @@ async def on_audio_chunk(chunk: cl.InputAudioChunk):
 async def on_audio_end():
     """Process complete audio recording and transcribe it."""
     chunks = cl.user_session.get("audio_chunks", [])
-    mime = cl.user_session.get("audio_mime", "audio/webm")
+    sample_rate = cl.user_session.get("audio_sample_rate") or 24000
+    channels = cl.user_session.get("audio_channels") or 1
+    sample_width = cl.user_session.get("audio_sample_width") or 2
     
     if not chunks:
         await cl.Message(content="❌ Nenhum áudio foi gravado.").send()
         return
     
     # Combine all chunks into single audio bytes
-    audio_bytes = b"".join(chunks)
+    pcm_bytes = b"".join(chunks)
     
     # Clear chunks from session
     cl.user_session.set("audio_chunks", None)
     cl.user_session.set("audio_mime", None)
+    cl.user_session.set("audio_sample_rate", None)
+    cl.user_session.set("audio_channels", None)
+    cl.user_session.set("audio_sample_width", None)
     
-    # Determine file extension from MIME type
-    mime_to_ext = {
-        "audio/webm": ".webm",
-        "audio/ogg": ".ogg",
-        "audio/wav": ".wav",
-        "audio/mp3": ".mp3",
-        "audio/m4a": ".m4a",
-    }
-    ext = mime_to_ext.get(mime, ".webm")
-    filename = f"recorded_audio{ext}"
+    # Chainlit streams raw PCM; wrap it into a WAV container
+    audio_bytes = pcm_to_wav_bytes(
+        pcm_bytes=pcm_bytes,
+        sample_rate=sample_rate,
+        channels=channels,
+        sample_width=sample_width
+    )
+    filename = "recorded_audio.wav"
     
     # Process the recorded audio
     transcription = await process_audio_and_transcribe(

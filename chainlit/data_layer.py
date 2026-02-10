@@ -397,10 +397,17 @@ class DocScribeDataLayer(BaseDataLayer):
     async def delete_thread(self, thread_id: str):
         try:
             pool = await self._get_pool()
+            tid = self._safe_uuid(thread_id)
             async with pool.acquire() as conn:
+                # Delete from PascalCase Chainlit table (sidebar)
                 await conn.execute(
                     'DELETE FROM "Thread" WHERE "id" = $1',
-                    self._safe_uuid(thread_id),
+                    tid,
+                )
+                # Also clean up the custom lowercase threads table
+                await conn.execute(
+                    'DELETE FROM "threads" WHERE "id" = $1',
+                    str(thread_id),
                 )
         except Exception:
             logger.error(f"delete_thread error:\n{traceback.format_exc()}")
@@ -431,9 +438,15 @@ class DocScribeDataLayer(BaseDataLayer):
         idx = 1
 
         if user_id:
-            conditions.append(f'"userIdentifier" = ${idx}')
-            params.append(user_id)
-            idx += 1
+            uid = self._safe_uuid(user_id)
+            if uid:
+                conditions.append(f'"userId" = ${idx}')
+                params.append(uid)
+                idx += 1
+            else:
+                conditions.append(f'"userIdentifier" = ${idx}')
+                params.append(user_id)
+                idx += 1
 
         if search:
             conditions.append(f'"name" ILIKE ${idx}')
@@ -678,17 +691,34 @@ class DocScribeDataLayer(BaseDataLayer):
                     params.append(name)
                     idx += 1
                 if user_id is not None:
-                    user_row = await conn.fetchrow(
-                        'SELECT "id" FROM "User" WHERE "identifier" = $1',
-                        user_id,
-                    )
-                    if user_row:
+                    user_uuid = self._safe_uuid(user_id)
+                    if user_uuid:
+                        # user_id is a UUID (from Chainlit internals)
                         sets.append(f'"userId" = ${idx}')
-                        params.append(user_row["id"])
+                        params.append(user_uuid)
                         idx += 1
-                    sets.append(f'"userIdentifier" = ${idx}')
-                    params.append(user_id)
-                    idx += 1
+                        # Resolve identifier (email) from User table
+                        user_row = await conn.fetchrow(
+                            'SELECT "identifier" FROM "User" WHERE "id" = $1',
+                            user_uuid,
+                        )
+                        if user_row:
+                            sets.append(f'"userIdentifier" = ${idx}')
+                            params.append(user_row["identifier"])
+                            idx += 1
+                    else:
+                        # user_id is an identifier (email)
+                        user_row = await conn.fetchrow(
+                            'SELECT "id" FROM "User" WHERE "identifier" = $1',
+                            user_id,
+                        )
+                        if user_row:
+                            sets.append(f'"userId" = ${idx}')
+                            params.append(user_row["id"])
+                            idx += 1
+                        sets.append(f'"userIdentifier" = ${idx}')
+                        params.append(user_id)
+                        idx += 1
                 if metadata is not None:
                     sets.append(f'"metadata" = ${idx}::jsonb')
                     params.append(_to_json(metadata))
@@ -703,14 +733,28 @@ class DocScribeDataLayer(BaseDataLayer):
                     query = f'UPDATE "Thread" SET {", ".join(sets)} WHERE "id" = ${idx}'
                     await conn.execute(query, *params)
             else:
-                user_uuid = None
+                user_uuid_val = None
+                user_ident_val = None
                 if user_id:
-                    user_row = await conn.fetchrow(
-                        'SELECT "id" FROM "User" WHERE "identifier" = $1',
-                        user_id,
-                    )
-                    if user_row:
-                        user_uuid = user_row["id"]
+                    parsed_uuid = self._safe_uuid(user_id)
+                    if parsed_uuid:
+                        # user_id is a UUID (from Chainlit internals)
+                        user_uuid_val = parsed_uuid
+                        user_row = await conn.fetchrow(
+                            'SELECT "identifier" FROM "User" WHERE "id" = $1',
+                            parsed_uuid,
+                        )
+                        if user_row:
+                            user_ident_val = user_row["identifier"]
+                    else:
+                        # user_id is an identifier (email)
+                        user_ident_val = user_id
+                        user_row = await conn.fetchrow(
+                            'SELECT "id" FROM "User" WHERE "identifier" = $1',
+                            user_id,
+                        )
+                        if user_row:
+                            user_uuid_val = user_row["id"]
 
                 await conn.execute(
                     '''
@@ -722,8 +766,8 @@ class DocScribeDataLayer(BaseDataLayer):
                     tid,
                     now,
                     name,
-                    user_uuid,
-                    user_id,
+                    user_uuid_val,
+                    user_ident_val,
                     tags,
                     _to_json(metadata or {}),
                 )

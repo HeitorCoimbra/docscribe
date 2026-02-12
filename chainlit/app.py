@@ -16,7 +16,7 @@ import logging
 import uuid
 import io
 import wave
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 # Force UTF-8 for stdout/stderr in containers with ASCII locale
@@ -380,7 +380,7 @@ async def process_audio_and_transcribe(
             }
         )
         await cl.Message(
-            content=f"✅ **{source_label.capitalize()} transcrito:**",
+            content=f"✅ **{source_label.capitalize()} transcrito:**\n\n{transcription}",
             elements=[transcription_element]
         ).send()
         
@@ -476,6 +476,22 @@ async def on_audio_end():
     )
     
     if transcription:
+        # Persist a user_message step so the transcription appears on resume
+        thread_id = cl.user_session.get("thread_id")
+        if thread_id:
+            try:
+                import chainlit.data as cl_data
+                if cl_data._data_layer:
+                    await cl_data._data_layer.create_step({
+                        "id": str(uuid.uuid4()),
+                        "threadId": thread_id,
+                        "type": "user_message",
+                        "output": f"[Transcrição do áudio gravado]\n\n{transcription}",
+                        "createdAt": datetime.now(timezone.utc).isoformat(),
+                    })
+            except Exception as e:
+                logger.error(f"Failed to persist transcription step: {e}")
+
         # Process the transcription as if it came from a message
         synthetic_message = cl.Message(
             content=f"[Transcrição do áudio gravado]\n\n{transcription}"
@@ -681,37 +697,39 @@ async def on_chat_resume(thread: ThreadDict):
         cl.user_session.set("thread_id", thread_id)
         cl.user_session.set("current_summary", None)
 
-        # Reconstruct message history from data layer steps
+        # Reconstruct message history — prefer custom messages table (has correct
+        # user/assistant alternation for both text and audio inputs), fall back
+        # to data layer steps if no custom messages exist.
         history: list[dict] = []
-        for step in steps:
-            if not isinstance(step, dict):
-                continue
-            step_type = step.get("type", "")
-            if step_type == "user_message":
-                content = step.get("output") or step.get("input") or ""
-                if content:
-                    history.append({"role": "user", "content": content})
-            elif step_type in ("assistant_message", "run"):
-                content = step.get("output", "")
-                if content:
-                    history.append({"role": "assistant", "content": content})
+        db = get_db_session()
+        if db:
+            try:
+                from database import MessageRepository
+                msg_repo = MessageRepository(db)
+                messages = msg_repo.get_thread_messages(thread_id)
+                history = [
+                    {"role": msg.role, "content": msg.content}
+                    for msg in messages
+                ]
+            except Exception as e:
+                logger.error(f"Failed to load messages from DB: {e}")
+            finally:
+                db.close()
 
-        # Fall back to custom messages table if no steps found
+        # Fall back to data layer steps if custom table had nothing
         if not history:
-            db = get_db_session()
-            if db:
-                try:
-                    from database import MessageRepository
-                    msg_repo = MessageRepository(db)
-                    messages = msg_repo.get_thread_messages(thread_id)
-                    history = [
-                        {"role": msg.role, "content": msg.content}
-                        for msg in messages
-                    ]
-                except Exception as e:
-                    logger.error(f"Failed to load messages from DB: {e}")
-                finally:
-                    db.close()
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                step_type = step.get("type", "")
+                if step_type == "user_message":
+                    content = step.get("output") or step.get("input") or ""
+                    if content:
+                        history.append({"role": "user", "content": content})
+                elif step_type in ("assistant_message", "run"):
+                    content = step.get("output", "")
+                    if content:
+                        history.append({"role": "assistant", "content": content})
 
         cl.user_session.set("message_history", history)
 

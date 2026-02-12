@@ -112,15 +112,12 @@
   }
 
   // ── Sidebar live-inject ──────────────────────────────────────────
-  // Chainlit's sidebar only fetches threads on page load.
-  // Poll briefly after page load to pick up the current conversation
-  // once the first message is sent (thread gets persisted on first msg).
+  // When a new chat starts, the backend sends a window message with
+  // the thread info.  We inject it into the sidebar immediately —
+  // no polling or extra network requests needed.
 
   var threadTemplate = null;
   var injectedIds = new Set();
-  var pollTimer = null;
-  var pollCount = 0;
-  var MAX_POLLS = 12; // 12 * 5s = 60s
 
   function captureTemplate() {
     if (threadTemplate) return true;
@@ -132,18 +129,6 @@
       return true;
     }
     return false;
-  }
-
-  function knownSidebarIds() {
-    var ids = new Set();
-    var container = document.getElementById("thread-history");
-    if (!container) return ids;
-    container.querySelectorAll('[id^="thread-"]').forEach(function (el) {
-      if (!el.classList.contains("thread-date-header")) {
-        ids.add(el.id);
-      }
-    });
-    return ids;
   }
 
   function injectThread(container, thread) {
@@ -189,55 +174,26 @@
     injectedIds.add(domId);
   }
 
-  function pollForNewThreads() {
-    pollCount++;
-    if (pollCount > MAX_POLLS) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-      return;
-    }
+  // ── Window message listener (replaces polling) ─────────────────
+  window.addEventListener("message", function (event) {
+    if (!event.data || event.data.type !== "new_thread") return;
+
+    var threadId = event.data.threadId;
+    var name = event.data.name || "Nova Sessão";
+    var createdAt = event.data.createdAt || new Date().toISOString();
+
+    if (!threadId) return;
+
+    // Record date for grouping
+    threadDates[threadId] = createdAt;
 
     var container = document.getElementById("thread-history");
     if (!container) return;
 
     captureTemplate();
-    var existing = knownSidebarIds();
-
-    _fetch("/project/threads", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pagination: { first: 20 }, filter: {} }),
-    })
-      .then(function (r) {
-        return r.json();
-      })
-      .then(function (data) {
-        if (!data || !Array.isArray(data.data)) return;
-
-        var injected = false;
-        data.data.forEach(function (t) {
-          if (t.id && t.createdAt) threadDates[t.id] = t.createdAt;
-          var domId = "thread-" + t.id;
-          if (!existing.has(domId)) {
-            injectThread(container, t);
-            injected = true;
-          }
-        });
-
-        if (injected) {
-          scheduleGrouping();
-          // Stop polling once we've successfully injected
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
-      })
-      .catch(function () {});
-  }
-
-  function startPolling() {
-    if (pollTimer) return;
-    pollTimer = setInterval(pollForNewThreads, 5000);
-  }
+    injectThread(container, { id: threadId, name: name });
+    scheduleGrouping();
+  });
 
   // ── Observer ─────────────────────────────────────────────────────
   function observe() {
@@ -247,7 +203,6 @@
         scheduleGrouping();
       }).observe(el, { childList: true, subtree: true });
       scheduleGrouping();
-      startPolling();
       return;
     }
     new MutationObserver(function (_, obs) {

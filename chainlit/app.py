@@ -287,6 +287,14 @@ async def on_chat_start():
     cl.user_session.set("current_summary", None)
     cl.user_session.set("thread_persisted", False)
 
+    # Notify frontend JS to inject thread into sidebar immediately
+    await cl.send_window_message({
+        "type": "new_thread",
+        "threadId": thread_id,
+        "name": "Nova Sessão",
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+    })
+
     # Welcome message
     await cl.Message(
         content="""👋 **Bem-vindo ao DocScribe!**

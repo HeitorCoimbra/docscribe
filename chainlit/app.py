@@ -44,6 +44,8 @@ try:
     chainlit_config.features.audio.sample_rate = 24000
     chainlit_config.features.spontaneous_file_upload.enabled = True
     chainlit_config.features.spontaneous_file_upload.accept = ["audio/*"]
+    chainlit_config.ui.custom_js = "/public/group-threads-by-date.js"
+    chainlit_config.ui.custom_css = "/public/group-threads-by-date.css"
 except Exception as e:
     logger.warning(f"Could not configure audio/upload features: {e}")
 
@@ -271,8 +273,6 @@ else:
 @cl.on_chat_start
 async def on_chat_start():
     """Initialize new chat session."""
-    user = cl.user_session.get("user")
-
     # Get thread ID from Chainlit context (set by data layer) or generate one
     thread_id = None
     try:
@@ -282,47 +282,10 @@ async def on_chat_start():
     if not thread_id:
         thread_id = str(uuid.uuid4())
 
-    # Try to create thread in custom database table for domain-specific data
-    if user:
-        db = get_db_session()
-        if db:
-            try:
-                from database import ThreadRepository, UserRepository
-                user_repo = UserRepository(db)
-                metadata = user.metadata or {}
-                db_user = user_repo.get_or_create_user(
-                    email=metadata.get("email", user.identifier),
-                    name=metadata.get("name"),
-                    avatar_url=metadata.get("avatar"),
-                    provider=metadata.get("provider"),
-                )
-                thread_repo = ThreadRepository(db)
-                thread_repo.create_thread_with_id(
-                    thread_id=thread_id,
-                    user_id=db_user.id,
-                    title="Nova Sessão"
-                )
-            except Exception as e:
-                logger.error(f"Failed to create thread in DB: {e}")
-            finally:
-                db.close()
-
-    # Ensure thread is registered in data layer with user info (for sidebar)
-    if user:
-        try:
-            import chainlit.data as cl_data
-            if cl_data._data_layer:
-                await cl_data._data_layer.update_thread(
-                    thread_id=thread_id,
-                    user_id=user.identifier,
-                    name="Nova Sessão",
-                )
-        except Exception as e:
-            logger.error(f"Failed to register thread in data layer: {e}")
-
     cl.user_session.set("thread_id", thread_id)
     cl.user_session.set("message_history", [])
     cl.user_session.set("current_summary", None)
+    cl.user_session.set("thread_persisted", False)
 
     # Welcome message
     await cl.Message(
@@ -340,6 +303,56 @@ Sou seu assistente para criar sumários de pacientes de UTI.
 *Dica: Você pode enviar múltiplos áudios e eu consolidarei as informações.*
 """
     ).send()
+
+
+async def ensure_thread_persisted(thread_id: str):
+    """Create the thread in both custom DB and data layer on first message.
+
+    Uses a session flag so this only runs once per chat session.
+    """
+    if cl.user_session.get("thread_persisted"):
+        return
+    cl.user_session.set("thread_persisted", True)
+
+    user = cl.user_session.get("user")
+    if not user:
+        return
+
+    # Custom DB table (domain-specific data)
+    db = get_db_session()
+    if db:
+        try:
+            from database import ThreadRepository, UserRepository
+            user_repo = UserRepository(db)
+            metadata = user.metadata or {}
+            db_user = user_repo.get_or_create_user(
+                email=metadata.get("email", user.identifier),
+                name=metadata.get("name"),
+                avatar_url=metadata.get("avatar"),
+                provider=metadata.get("provider"),
+            )
+            thread_repo = ThreadRepository(db)
+            thread_repo.create_thread_with_id(
+                thread_id=thread_id,
+                user_id=db_user.id,
+                title="Nova Sessão"
+            )
+        except Exception as e:
+            logger.error(f"Failed to create thread in DB: {e}")
+        finally:
+            db.close()
+
+    # Data layer (powers the sidebar)
+    try:
+        import chainlit.data as cl_data
+        if cl_data._data_layer:
+            await cl_data._data_layer.update_thread(
+                thread_id=thread_id,
+                user_id=user.identifier,
+                name="Nova Sessão",
+            )
+    except Exception as e:
+        logger.error(f"Failed to register thread in data layer: {e}")
 
 
 # =============================================================================
@@ -551,10 +564,13 @@ async def on_message(message: cl.Message):
     
     if not user_content.strip():
         return
-    
+
+    # Persist thread on first real message (shows it in sidebar)
+    await ensure_thread_persisted(thread_id)
+
     # Add user message to history
     history.append({"role": "user", "content": user_content})
-    
+
     # Save message to database
     db = get_db_session()
     if db:
@@ -695,6 +711,7 @@ async def on_chat_resume(thread: ThreadDict):
             return
 
         cl.user_session.set("thread_id", thread_id)
+        cl.user_session.set("thread_persisted", True)
         cl.user_session.set("current_summary", None)
 
         # Reconstruct message history — prefer custom messages table (has correct

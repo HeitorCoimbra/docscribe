@@ -1,0 +1,9 @@
+.thread-date-header {
+  padding: 8px 12px 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: hsl(var(--sidebar-foreground) / 0.5);
+  letter-spacing: 0.025em;
+  pointer-events: none;
+  user-select: none;
+}

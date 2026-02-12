@@ -96,19 +96,33 @@ class DocScribeDataLayer(BaseDataLayer):
         except (ValueError, AttributeError):
             return None
 
-    async def _resolve_custom_user_email(self, user_id: uuid.UUID) -> Optional[str]:
-        """Resolve legacy user UUID from custom users table to email."""
-        try:
-            pool = await self._get_pool()
-            async with pool.acquire() as conn:
+    async def _resolve_user_email(
+        self, conn, user_id, user_identifier
+    ) -> Optional[str]:
+        """Resolve the actual user email from Thread row columns.
+
+        Handles the case where userIdentifier contains a PersistedUser UUID
+        instead of an email address.
+        """
+        # If userIdentifier is already an email (not a UUID), return it
+        if user_identifier and not self._safe_uuid(user_identifier):
+            return user_identifier
+        # If userId is set, resolve email from PascalCase "User" table
+        if user_id:
+            row = await conn.fetchrow(
+                'SELECT "identifier" FROM "User" WHERE "id" = $1', user_id
+            )
+            if row and row["identifier"]:
+                return row["identifier"]
+        # If userIdentifier is a UUID, try PascalCase "User" table
+        if user_identifier:
+            uid = self._safe_uuid(user_identifier)
+            if uid:
                 row = await conn.fetchrow(
-                    'SELECT "email" FROM "users" WHERE "id" = $1',
-                    str(user_id),
+                    'SELECT "identifier" FROM "User" WHERE "id" = $1', uid
                 )
-            if row and row.get("email"):
-                return row["email"]
-        except Exception:
-            logger.error(f"_resolve_custom_user_email error:\n{traceback.format_exc()}")
+                if row and row["identifier"]:
+                    return row["identifier"]
         return None
 
     # ── User ─────────────────────────────────────────────────────────
@@ -369,27 +383,12 @@ class DocScribeDataLayer(BaseDataLayer):
                     'SELECT "userId", "userIdentifier" FROM "Thread" WHERE "id" = $1',
                     self._safe_uuid(thread_id),
                 )
-            if not row:
-                return ""
-            # Primary: use userIdentifier directly (email)
-            if row["userIdentifier"]:
-                # If legacy UUID was stored, resolve to email from custom users table
-                legacy_uuid = self._safe_uuid(row["userIdentifier"])
-                if legacy_uuid:
-                    resolved = await self._resolve_custom_user_email(legacy_uuid)
-                    if resolved:
-                        return resolved
-                return row["userIdentifier"]
-            # Fallback: resolve identifier from PascalCase User table via userId
-            if row["userId"]:
-                async with pool.acquire() as conn:
-                    user_row = await conn.fetchrow(
-                        'SELECT "identifier" FROM "User" WHERE "id" = $1',
-                        row["userId"],
-                    )
-                if user_row and user_row["identifier"]:
-                    return user_row["identifier"]
-            return ""
+                if not row:
+                    return ""
+                resolved = await self._resolve_user_email(
+                    conn, row["userId"], row["userIdentifier"]
+                )
+                return resolved or ""
         except Exception:
             logger.error(f"get_thread_author error:\n{traceback.format_exc()}")
             return ""
@@ -399,15 +398,20 @@ class DocScribeDataLayer(BaseDataLayer):
             pool = await self._get_pool()
             tid = self._safe_uuid(thread_id)
             async with pool.acquire() as conn:
-                # Delete from PascalCase Chainlit table (sidebar)
+                # Delete custom messages first (FK: messages.thread_id -> threads.id)
                 await conn.execute(
-                    'DELETE FROM "Thread" WHERE "id" = $1',
-                    tid,
+                    'DELETE FROM "messages" WHERE "thread_id" = $1',
+                    str(thread_id),
                 )
-                # Also clean up the custom lowercase threads table
+                # Then custom threads table (domain-specific data)
                 await conn.execute(
                     'DELETE FROM "threads" WHERE "id" = $1',
                     str(thread_id),
+                )
+                # Finally PascalCase Chainlit table (sidebar; Step/Element/Feedback CASCADE)
+                await conn.execute(
+                    'DELETE FROM "Thread" WHERE "id" = $1',
+                    tid,
                 )
         except Exception:
             logger.error(f"delete_thread error:\n{traceback.format_exc()}")
@@ -481,6 +485,9 @@ class DocScribeDataLayer(BaseDataLayer):
             tid = str(row["id"])
 
             async with pool.acquire() as conn:
+                resolved_email = await self._resolve_user_email(
+                    conn, row["userId"], row["userIdentifier"]
+                )
                 step_rows = await conn.fetch(
                     '''
                     SELECT "id", "name", "type", "threadId", "parentId",
@@ -502,7 +509,7 @@ class DocScribeDataLayer(BaseDataLayer):
                 "createdAt": row["createdAt"] or "",
                 "name": row["name"],
                 "userId": str(row["userId"]) if row["userId"] else None,
-                "userIdentifier": row["userIdentifier"],
+                "userIdentifier": resolved_email or row["userIdentifier"],
                 "tags": row["tags"],
                 "metadata": _from_json(row["metadata"], {}),
                 "steps": steps,
@@ -566,6 +573,9 @@ class DocScribeDataLayer(BaseDataLayer):
             }
 
         async with pool.acquire() as conn:
+            resolved_email = await self._resolve_user_email(
+                conn, row["userId"], row["userIdentifier"]
+            )
             step_rows = await conn.fetch(
                 '''
                 SELECT "id", "name", "type", "threadId", "parentId",
@@ -613,7 +623,7 @@ class DocScribeDataLayer(BaseDataLayer):
             "createdAt": row["createdAt"] or "",
             "name": row["name"],
             "userId": str(row["userId"]) if row["userId"] else None,
-            "userIdentifier": row["userIdentifier"],
+            "userIdentifier": resolved_email or row["userIdentifier"],
             "tags": row["tags"],
             "metadata": _from_json(row["metadata"], {}),
             "steps": steps,

@@ -585,6 +585,7 @@ async def on_message(message: cl.Message):
 
     # Process audio if present
     if audio_files:
+        await ensure_thread_persisted(thread_id)
         for i, audio_file in enumerate(audio_files, 1):
             label = f"áudio {i}" if len(audio_files) > 1 else "áudio"
 

@@ -436,6 +436,7 @@ async def process_audio_and_transcribe(
                 "characterCount": len(transcription),
                 "audioBase64": base64.b64encode(audio_bytes).decode("utf-8"),
                 "audioMime": mimetypes.guess_type(filename)[0] or "audio/wav",
+                "label": source_label.capitalize(),
             }
         )
         await cl.Message(
@@ -580,33 +581,38 @@ async def on_message(message: cl.Message):
         audio_files = [f for f in message.elements if f.mime and f.mime.startswith("audio/")]
     
     user_content = message.content or ""
-    transcription = None
-    
+    transcriptions = []
+
     # Process audio if present
     if audio_files:
-        audio_file = audio_files[0]
-        
-        # Read audio bytes
-        if hasattr(audio_file, 'content') and audio_file.content:
-            audio_bytes = audio_file.content
-        elif hasattr(audio_file, 'path') and audio_file.path:
-            with open(audio_file.path, 'rb') as f:
-                audio_bytes = f.read()
-        else:
-            await cl.Message(content="❌ Não foi possível ler o arquivo de áudio.").send()
+        for i, audio_file in enumerate(audio_files, 1):
+            label = f"áudio {i}" if len(audio_files) > 1 else "áudio"
+
+            if hasattr(audio_file, 'content') and audio_file.content:
+                audio_bytes = audio_file.content
+            elif hasattr(audio_file, 'path') and audio_file.path:
+                with open(audio_file.path, 'rb') as f:
+                    audio_bytes = f.read()
+            else:
+                await cl.Message(content=f"❌ Não foi possível ler o {label}.").send()
+                continue
+
+            t = await process_audio_and_transcribe(
+                audio_bytes=audio_bytes,
+                filename=audio_file.name or f"audio_{i}.mp3",
+                source_label=label
+            )
+            if t:
+                transcriptions.append(t)
+
+        if not transcriptions:
             return
-        
-        # Process and transcribe audio
-        transcription = await process_audio_and_transcribe(
-            audio_bytes=audio_bytes,
-            filename=audio_file.name or "audio.mp3",
-            source_label="áudio"
-        )
-        
-        if transcription:
-            user_content = f"[Transcrição do áudio]\n\n{transcription}"
+
+        if len(transcriptions) == 1:
+            user_content = f"[Transcrição do áudio]\n\n{transcriptions[0]}"
         else:
-            return
+            parts = [f"Áudio {i}: {t}" for i, t in enumerate(transcriptions, 1)]
+            user_content = f"[Transcrição dos áudios]\n\n" + "\n\n".join(parts)
     
     if not user_content.strip():
         return
@@ -628,7 +634,7 @@ async def on_message(message: cl.Message):
                 role="user",
                 content=user_content,
                 has_audio=bool(audio_files),
-                transcription=transcription
+                transcription="\n\n".join(transcriptions) if transcriptions else None
             )
         except Exception as e:
             logger.error(f"Failed to save user message: {e}")

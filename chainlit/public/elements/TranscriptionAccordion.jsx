@@ -14,7 +14,7 @@ export default function TranscriptionAccordion({ props }) {
     <Accordion type="single" collapsible className="w-full">
       <AccordionItem value="transcription">
         <AccordionTrigger>
-          📝 Ver transcrição completa ({props.characterCount} caracteres)
+          📝 {props.label ? `${props.label} — ` : ""}Ver transcrição completa ({props.characterCount} caracteres)
         </AccordionTrigger>
         <AccordionContent>
           {audioSrc && (

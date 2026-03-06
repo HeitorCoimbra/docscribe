@@ -124,10 +124,12 @@ Se algo não foi mencionado, NÃO inclua.
 VM = ventilação mecânica | CVC = cateter venoso central | SVD = sonda vesical de demora
 DVA = droga vasoativa | IRA = insuficiência renal aguda | TOT = tubo orotraqueal
 TQT = traqueostomia | ATB = antibiótico | BIC = bomba de infusão contínua
+CIHDOTT = Comissão Intra-Hospitalar de Doação de Órgãos e Tecidos para Transplante
 
 === JARGÕES MÉDICOS ===
 noradrenalina = nora, nor | midazolam = dormonid | fentanil = fenta
 piperacilina+tazobactam = tazo, pipetazo | meropenem = mero | vancomicina = vanco
+ceftazidima = fortaz
 """
 
 HUMAN_PROMPT_TEMPLATE = """Analise a transcrição abaixo e extraia o sumário do paciente.

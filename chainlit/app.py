@@ -16,6 +16,7 @@ import logging
 import uuid
 import io
 import wave
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -165,7 +166,11 @@ def build_system_prompt(current_summary: str | None = None) -> str:
 {current_summary}
 === FIM DO SUMARIO ATUAL ==="""
 
-    return f"""{SYSTEM_PROMPT}
+    current_date = datetime.now().strftime("%d/%m/%Y")
+
+    return f"""Data de hoje: {current_date}
+
+{SYSTEM_PROMPT}
 
 === INSTRUCOES DE COMPORTAMENTO ===
 
@@ -267,12 +272,41 @@ else:
 
 
 # =============================================================================
+# BACKGROUND CLEANUP
+# =============================================================================
+
+_cleanup_task_started = False
+
+
+async def _cleanup_loop(days: int = 60, interval_hours: int = 24):
+    """Periodically delete threads and all related data older than `days` days."""
+    await asyncio.sleep(60)  # Let the app finish initializing first
+    while True:
+        try:
+            import chainlit.data as cl_data
+            if cl_data._data_layer:
+                count = await cl_data._data_layer.cleanup_old_threads(days=days)
+                if count:
+                    logger.info(f"Cleanup: deleted {count} thread(s) older than {days} days")
+                else:
+                    logger.info("Cleanup: no old threads to delete")
+        except Exception as e:
+            logger.error(f"Cleanup loop error: {e}")
+        await asyncio.sleep(interval_hours * 3600)
+
+
+# =============================================================================
 # CHAT START
 # =============================================================================
 
 @cl.on_chat_start
 async def on_chat_start():
     """Initialize new chat session."""
+    global _cleanup_task_started
+    if not _cleanup_task_started and DATABASE_URL:
+        _cleanup_task_started = True
+        asyncio.create_task(_cleanup_loop())
+
     # Get thread ID from Chainlit context (set by data layer) or generate one
     thread_id = None
     try:

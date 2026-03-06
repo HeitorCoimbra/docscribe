@@ -782,6 +782,48 @@ class DocScribeDataLayer(BaseDataLayer):
                     _to_json(metadata or {}),
                 )
 
+    # ── Cleanup ──────────────────────────────────────────────────────
+
+    async def cleanup_old_threads(self, days: int = 60) -> int:
+        """Delete threads and all cascading data older than N days.
+
+        Removes from both table families:
+        - Custom lowercase: messages → threads (FK cascade)
+        - Chainlit PascalCase: Step/Element/Feedback → Thread (FK cascade)
+
+        Returns the number of threads deleted.
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            old_threads = await conn.fetch(
+                "SELECT id FROM threads WHERE created_at < NOW() - $1::interval",
+                f"{days} days",
+            )
+            if not old_threads:
+                return 0
+
+            deleted = 0
+            for row in old_threads:
+                tid_str = row["id"]
+                tid_uuid = self._safe_uuid(tid_str)
+                try:
+                    # Custom tables — messages cascade via FK
+                    await conn.execute(
+                        'DELETE FROM "threads" WHERE "id" = $1', tid_str
+                    )
+                    # Chainlit PascalCase — Step/Element/Feedback cascade via FK
+                    if tid_uuid:
+                        await conn.execute(
+                            'DELETE FROM "Thread" WHERE "id" = $1', tid_uuid
+                        )
+                    deleted += 1
+                except Exception:
+                    logger.warning(
+                        f"Failed to delete thread {tid_str}:\n{traceback.format_exc()}"
+                    )
+
+            return deleted
+
     # ── Utility ──────────────────────────────────────────────────────
 
     async def build_debug_url(self) -> str:

@@ -15,6 +15,10 @@ ENV/
 # Chainlit
 .files/
 
+# Claude Code
+.claude/
+CLAUDE.md
+
 # IDE
 .idea/
 .vscode/

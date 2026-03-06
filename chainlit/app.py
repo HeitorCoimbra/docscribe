@@ -14,6 +14,8 @@ import sys
 import json
 import logging
 import uuid
+import base64
+import mimetypes
 import io
 import wave
 import asyncio
@@ -431,11 +433,13 @@ async def process_audio_and_transcribe(
             name="TranscriptionAccordion",
             props={
                 "transcription": transcription,
-                "characterCount": len(transcription)
+                "characterCount": len(transcription),
+                "audioBase64": base64.b64encode(audio_bytes).decode("utf-8"),
+                "audioMime": mimetypes.guess_type(filename)[0] or "audio/wav",
             }
         )
         await cl.Message(
-            content=f"✅ **{source_label.capitalize()} transcrito:**\n\n{transcription}",
+            content=f"✅ **{source_label.capitalize()} transcrito:**",
             elements=[transcription_element]
         ).send()
         

@@ -803,6 +803,34 @@ async def on_chat_resume(thread: ThreadDict):
 
         cl.user_session.set("message_history", history)
 
+        # Re-populate session file store for custom elements (TranscriptionAccordion).
+        # Chainlit serves element content via /project/file/{chainlitKey}?session_id=...
+        # which looks up session.files — a session-scoped in-memory dict cleared on resume.
+        # We restore each entry so the frontend can fetch the props JSON on the new session.
+        elements = thread.get("elements", []) if isinstance(thread, dict) else []
+        if elements:
+            from chainlit.context import context
+            session = context.session
+            session.files_dir.mkdir(exist_ok=True)
+            for elem in elements:
+                chainlit_key = elem.get("chainlitKey")
+                props = elem.get("props")
+                if not chainlit_key or not props:
+                    continue
+                mime = elem.get("mime") or "application/json"
+                content_bytes = json.dumps(props).encode("utf-8")
+                ext = mimetypes.guess_extension(mime) or ""
+                file_path = session.files_dir / f"{chainlit_key}{ext}"
+                with open(file_path, "wb") as fh:
+                    fh.write(content_bytes)
+                session.files[chainlit_key] = {
+                    "id": chainlit_key,
+                    "path": file_path,
+                    "name": elem.get("name", "element"),
+                    "type": mime,
+                    "size": len(content_bytes),
+                }
+
         # Restore summary state from last assistant message
         for msg in reversed(history):
             if msg.get("role") == "assistant":

@@ -5,7 +5,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 
-export default function TranscriptionAccordion({ props }) {
+export default function TranscriptionAccordion() {
   const audioSrc = props.audioBase64
     ? `data:${props.audioMime || "audio/wav"};base64,${props.audioBase64}`
     : null;

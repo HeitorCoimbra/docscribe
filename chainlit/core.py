@@ -187,6 +187,14 @@ def transcribe_audio(
     import io
     from groq import Groq
 
+    groq_max_bytes = 25 * 1024 * 1024  # 25 MB limit
+    if len(audio_bytes) > groq_max_bytes:
+        size_mb = len(audio_bytes) / 1024 / 1024
+        raise ValueError(
+            f"Áudio muito grande ({size_mb:.0f} MB). O limite é 25 MB. "
+            "Grave em partes menores ou envie um arquivo comprimido (mp3, opus)."
+        )
+
     client = Groq(api_key=groq_api_key)
 
     # Use BytesIO with a name attribute — avoids encoding issues

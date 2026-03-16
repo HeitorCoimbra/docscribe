@@ -34,34 +34,6 @@ pip install -r requirements.txt
 chainlit run app.py
 ```
 
-## Deploy no Railway
-
-### 1. Criar projeto no Railway
-
-1. Acesse [railway.app](https://railway.app)
-2. Crie um novo projeto
-3. Adicione um serviço PostgreSQL
-4. Adicione um serviço a partir do GitHub
-
-### 2. Configurar variáveis
-
-No painel do Railway, adicione:
-
-| Variável | Descrição |
-|----------|-----------|
-| `GROQ_API_KEY` | Chave da API Groq |
-| `ANTHROPIC_API_KEY` | Chave da API Anthropic |
-| `CHAINLIT_AUTH_SECRET` | `openssl rand -hex 32` |
-| `OAUTH_GOOGLE_CLIENT_ID` | (opcional) OAuth Google |
-| `OAUTH_GOOGLE_CLIENT_SECRET` | (opcional) OAuth Google |
-| `CHAINLIT_URL` | URL do seu app no Railway |
-
-> A variável `DATABASE_URL` é configurada automaticamente pelo Railway.
-
-### 3. Deploy
-
-O Railway faz deploy automático a cada push no GitHub.
-
 ## Estrutura de Pastas
 
 ```

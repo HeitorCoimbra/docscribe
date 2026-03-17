@@ -159,14 +159,56 @@ def extract_summary_from_response(response: str) -> str | None:
     return None
 
 
-def build_system_prompt(current_summary: str | None = None) -> str:
-    """Build the system prompt with optional current summary context."""
-    summary_context = ""
-    if current_summary:
-        summary_context = f"""
-=== SUMARIO ATUAL DO PACIENTE (use como base para atualizacoes) ===
+def extract_leito_number(summary: str) -> str | None:
+    """Extract leito number from a formatted summary string."""
+    match = re.search(r'\*\*Leito\s+([^\s*-]+)', summary)
+    return match.group(1).strip() if match else None
+
+
+def detect_referenced_leito(text: str, confirmed_leitos: dict) -> str | None:
+    """Return leito number if text explicitly references a confirmed leito."""
+    for leito_num in confirmed_leitos:
+        if re.search(rf'\bleito\s+{re.escape(leito_num)}\b', text, re.IGNORECASE):
+            return leito_num
+    return None
+
+
+def build_system_prompt(
+    confirmed_leitos: dict | None = None,
+    current_summary: str | None = None,
+    edit_target_leito: str | None = None
+) -> str:
+    """Build the system prompt with confirmed leitos context and current editable summary."""
+    confirmed_context = ""
+    if confirmed_leitos:
+        if edit_target_leito and edit_target_leito in confirmed_leitos:
+            others = {k: v for k, v in confirmed_leitos.items() if k != edit_target_leito}
+            target_summary = confirmed_leitos[edit_target_leito]
+            if others:
+                block = "\n\n".join(others.values())
+                confirmed_context = f"""
+=== LEITOS CONFIRMADOS (NÃO REPRODUZA NA RESPOSTA) ===
+{block}
+=== FIM ===\n"""
+            confirmed_context += f"""
+=== LEITO {edit_target_leito} EM REEDIÇÃO (atualize com as novas informações) ===
+{target_summary}
+=== FIM ==="""
+        else:
+            block = "\n\n".join(confirmed_leitos.values())
+            confirmed_context = f"""
+=== LEITOS JÁ CONFIRMADOS (NÃO REPRODUZA ESTES NA RESPOSTA) ===
+{block}
+=== FIM DOS LEITOS CONFIRMADOS ===
+
+IMPORTANTE: Não repita os leitos acima. Sua resposta deve conter SOMENTE o novo leito da transcrição atual."""
+
+    current_context = ""
+    if current_summary and not edit_target_leito:
+        current_context = f"""
+=== SUMÁRIO DO LEITO EM EDIÇÃO (use como base para atualizações) ===
 {current_summary}
-=== FIM DO SUMARIO ATUAL ==="""
+=== FIM DO SUMÁRIO EM EDIÇÃO ==="""
 
     current_date = datetime.now().strftime("%d/%m/%Y")
 
@@ -176,22 +218,20 @@ def build_system_prompt(current_summary: str | None = None) -> str:
 
 === INSTRUCOES DE COMPORTAMENTO ===
 
-REGRA PRINCIPAL: Quando receber uma transcricao de audio ou texto de passagem de plantao,
-voce DEVE SEMPRE responder IMEDIATAMENTE com o sumario estruturado abaixo.
-NAO faca perguntas antes de mostrar o sumario. NAO peca confirmacao antes de mostrar o sumario.
+Quando receber uma transcrição de áudio, responda IMEDIATAMENTE com o sumário do NOVO leito apenas.
+Não repita leitos já confirmados. Não faça perguntas antes de mostrar o sumário.
 
-Para campos que NAO podem ser preenchidos com base na transcricao, use exatamente:
-🔴 PENDENTE
+Para campos não preenchíveis, use: 🔴 PENDENTE
 
-FORMATO OBRIGATORIO DE RESPOSTA:
+FORMATO OBRIGATÓRIO DE RESPOSTA (UM LEITO POR VEZ):
 
 **Leito [X] - [Nome do Paciente]**
 
-**Diagnosticos:**
-1. [diagnostico extraido ou 🔴 PENDENTE]
+**Diagnósticos:**
+1. [diagnóstico extraído ou 🔴 PENDENTE]
 
-**Pendencias:**
-1. [pendencia extraida ou 🔴 PENDENTE]
+**Pendências:**
+1. [pendência extraída ou 🔴 PENDENTE]
 
 **Condutas:**
 - [conduta com verbo no infinitivo ou 🔴 PENDENTE]
@@ -199,12 +239,13 @@ FORMATO OBRIGATORIO DE RESPOSTA:
 ---
 Deseja corrigir ou adicionar algo?
 
-=== REGRAS DE ATUALIZACAO ===
-- Quando o usuario enviar correcoes, mostre o sumario COMPLETO atualizado (nao apenas o campo alterado)
-- Condutas SEMPRE comecam com verbo no INFINITIVO
-- Seja conciso. Nao repita instrucoes ao usuario, apenas mostre o sumario atualizado.
+=== REGRAS DE ATUALIZAÇÃO ===
+- Quando o usuário enviar correções, mostre o sumário COMPLETO do leito atual atualizado (não todos os leitos)
+- Condutas SEMPRE começam com verbo no INFINITIVO
+- Seja conciso. Não repita instruções ao usuário.
 
-{summary_context}"""
+{confirmed_context}
+{current_context}"""
 
 
 # =============================================================================
@@ -321,6 +362,8 @@ async def on_chat_start():
     cl.user_session.set("thread_id", thread_id)
     cl.user_session.set("message_history", [])
     cl.user_session.set("current_summary", None)
+    cl.user_session.set("confirmed_leitos", {})
+    cl.user_session.set("edit_target_leito", None)
     cl.user_session.set("thread_persisted", False)
 
     # Notify frontend JS to inject thread into sidebar immediately
@@ -648,33 +691,70 @@ async def on_message(message: cl.Message):
         await cl.Message(content="❌ ANTHROPIC_API_KEY não configurada").send()
         return
     
+    # Routing: confirm previous leito on new audio, or detect targeted leito edit
+    if transcriptions:
+        prev = cl.user_session.get("current_summary")
+        if prev:
+            num = extract_leito_number(prev)
+            if num:
+                confirmed = cl.user_session.get("confirmed_leitos", {})
+                confirmed[num] = prev
+                cl.user_session.set("confirmed_leitos", confirmed)
+        cl.user_session.set("current_summary", None)
+        cl.user_session.set("edit_target_leito", None)
+    else:
+        confirmed = cl.user_session.get("confirmed_leitos", {})
+        ref = detect_referenced_leito(user_content, confirmed)
+        cl.user_session.set("edit_target_leito", ref)
+
     # Generate response with Claude
     response_msg = cl.Message(content="")
     await response_msg.send()
-    
+
     try:
-        # Build API messages
-        api_messages = [{"role": m["role"], "content": m["content"]} for m in history]
-        
+        # Build API messages — replace full confirmed-leito responses with stubs
+        confirmed_leito_nums = set(cl.user_session.get("confirmed_leitos", {}).keys())
+        api_messages = []
+        for m in history:
+            if m["role"] == "assistant":
+                num = extract_leito_number(m["content"])
+                if num and num in confirmed_leito_nums:
+                    api_messages.append({"role": "assistant", "content": f"[Leito {num} confirmado]"})
+                    continue
+            api_messages.append({"role": m["role"], "content": m["content"]})
+
         # Stream response
         full_response = ""
-        current_summary = cl.user_session.get("current_summary")
+        confirmed_leitos = cl.user_session.get("confirmed_leitos", {})
+        current_summary  = cl.user_session.get("current_summary")
+        edit_target      = cl.user_session.get("edit_target_leito")
         with client.messages.stream(
             model=CLAUDE_MODEL,
-            max_tokens=2048,
-            system=build_system_prompt(current_summary),
+            max_tokens=4096,
+            system=build_system_prompt(
+                confirmed_leitos=confirmed_leitos,
+                current_summary=current_summary,
+                edit_target_leito=edit_target
+            ),
             messages=api_messages
         ) as stream:
             for text in stream.text_stream:
                 full_response += text
                 await response_msg.stream_token(text)
-        
+
         await response_msg.update()
-        
-        # Update current summary state if a summary was found
+
+        # Store response in correct location
         extracted = extract_summary_from_response(full_response)
         if extracted:
-            cl.user_session.set("current_summary", extracted)
+            edit_target = cl.user_session.get("edit_target_leito")
+            if edit_target:
+                confirmed = cl.user_session.get("confirmed_leitos", {})
+                confirmed[edit_target] = extracted
+                cl.user_session.set("confirmed_leitos", confirmed)
+                cl.user_session.set("edit_target_leito", None)
+            else:
+                cl.user_session.set("current_summary", extracted)
 
         # Add assistant response to history and cap to prevent context overflow
         history.append({"role": "assistant", "content": full_response})
@@ -766,6 +846,8 @@ async def on_chat_resume(thread: ThreadDict):
         cl.user_session.set("thread_id", thread_id)
         cl.user_session.set("thread_persisted", True)
         cl.user_session.set("current_summary", None)
+        cl.user_session.set("confirmed_leitos", {})
+        cl.user_session.set("edit_target_leito", None)
 
         # Reconstruct message history — prefer custom messages table (has correct
         # user/assistant alternation for both text and audio inputs), fall back
@@ -831,13 +913,26 @@ async def on_chat_resume(thread: ThreadDict):
                     "size": len(content_bytes),
                 }
 
-        # Restore summary state from last assistant message
-        for msg in reversed(history):
+        # Restore confirmed_leitos and current_summary from all assistant messages
+        confirmed_leitos = {}
+        last_summary = None
+        for msg in history:
             if msg.get("role") == "assistant":
                 extracted = extract_summary_from_response(msg.get("content", ""))
                 if extracted:
-                    cl.user_session.set("current_summary", extracted)
-                    break
+                    num = extract_leito_number(extracted)
+                    if num:
+                        confirmed_leitos[num] = extracted
+                    last_summary = extracted
+
+        # Last summary stays editable; remove it from confirmed
+        if last_summary:
+            last_num = extract_leito_number(last_summary)
+            if last_num and last_num in confirmed_leitos:
+                del confirmed_leitos[last_num]
+            cl.user_session.set("current_summary", last_summary)
+
+        cl.user_session.set("confirmed_leitos", confirmed_leitos)
     except Exception as e:
         logger.error(f"Failed to resume chat: {e}")
         await cl.Message(content="❌ Não foi possível carregar esta conversa.").send()

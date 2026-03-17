@@ -31,7 +31,7 @@ class SumarioPaciente(BaseModel):
     - condutas: Lista de condutas tomadas ou planejadas
     """
     
-    leito: str = Field(description="Número do leito (apenas o número, ex: '1', '2', '3')")
+    leito: str = Field(description="Número do leito. Se mencionado explicitamente, use apenas o número (ex: '1', '2'). Se ocluído/inaudível mas inferível pela sequência, use 'N (inferido)'. Se não identificável, use 'N/A'.")
     nome_paciente: str = Field(description="Nome completo do paciente como mencionado")
     
     diagnosticos: list[str] = Field(
@@ -120,6 +120,15 @@ Se algo não foi mencionado, NÃO inclua.
 • Use "norepinefrina" ou "noradrenalina" (NUNCA "noraepinefrina")
 • Use "ventilação mecânica invasiva" ou "VM" para pacientes intubados
 
+=== OCLUSÃO DE NÚMERO DE LEITO ===
+Em gravações de passagem de plantão, o número do leito pode ser inaudível ou ocluído. Quando isso ocorrer:
+
+1. IDENTIFIQUE os leitos cujos números foram mencionados claramente antes e depois do trecho ocluído.
+2. ANALISE se o perfil clínico do paciente ocluído é diferente do paciente do leito anterior — se for, trata-se de um paciente distinto, portanto um leito diferente.
+3. INFIRA o número do leito faltante com base na sequência numérica. Exemplo: se o leito 4 foi mencionado antes e o leito 6 depois, e há um perfil clínico distinto entre eles, infira que trata-se do leito 5.
+4. Quando inferir um número de leito, indique explicitamente que foi inferido. Use o formato: "leito [N] (inferido)".
+5. Se não for possível inferir com segurança (sequência não-contígua, múltiplos leitos possíveis), use "leito ? (não identificado)" e liste os leitos vizinhos conhecidos como contexto.
+
 === ACRÔNIMOS COMUNS ===
 VM = ventilação mecânica | CVC = cateter venoso central | SVD = sonda vesical de demora
 DVA = droga vasoativa | IRA = insuficiência renal aguda | TOT = tubo orotraqueal
@@ -141,7 +150,7 @@ TRANSCRIÇÃO:
 
 Retorne um JSON com a seguinte estrutura:
 {{
-    "leito": "número do leito (extraia da transcrição, ou use 'N/A' se não mencionado)",
+    "leito": "número do leito (extraia da transcrição; se ocluído/inaudível, infira pela sequência numérica e use o formato 'N (inferido)'; use 'N/A' apenas se não for possível inferir)",
     "nome_paciente": "nome do paciente",
     "diagnosticos": ["diagnóstico 1", "diagnóstico 2"],
     "pendencias": ["pendência 1", "pendência 2"],

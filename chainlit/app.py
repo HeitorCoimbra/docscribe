@@ -140,7 +140,8 @@ from core import (
     SumarioPaciente,
     SYSTEM_PROMPT,
     transcribe_audio,
-    CLAUDE_MODEL
+    CLAUDE_MODEL,
+    generate_pdf_report,
 )
 
 # =============================================================================
@@ -336,6 +337,57 @@ async def _cleanup_loop(days: int = 60, interval_hours: int = 24):
         except Exception as e:
             logger.error(f"Cleanup loop error: {e}")
         await asyncio.sleep(interval_hours * 3600)
+
+
+# =============================================================================
+# PDF EXPORT
+# =============================================================================
+
+@cl.action_callback("gerar_pdf")
+async def on_gerar_pdf(action: cl.Action):
+    """Generate and send a PDF of all session summaries."""
+    import tempfile
+    import os
+
+    confirmed_leitos = cl.user_session.get("confirmed_leitos", {})
+    current_summary = cl.user_session.get("current_summary")
+
+    all_summaries = list(confirmed_leitos.values())
+    if current_summary and current_summary not in all_summaries:
+        all_summaries.append(current_summary)
+
+    if not all_summaries:
+        await cl.Message(content="⚠️ Nenhum sumário disponível para gerar o PDF.").send()
+        return
+
+    try:
+        pdf_bytes = generate_pdf_report(all_summaries)
+    except Exception as e:
+        logger.error(f"PDF generation failed: {e}")
+        await cl.Message(content=f"❌ Erro ao gerar PDF: {str(e)}").send()
+        return
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".pdf", prefix="docscribe_")
+    try:
+        with os.fdopen(tmp_fd, "wb") as f:
+            f.write(pdf_bytes)
+        date_str = datetime.now().strftime("%Y%m%d_%H%M")
+        elements = [
+            cl.File(
+                name=f"sumarios_plantao_{date_str}.pdf",
+                path=tmp_path,
+                display="inline",
+            )
+        ]
+        await cl.Message(
+            content=f"📄 **PDF gerado** — {len(all_summaries)} leito(s):",
+            elements=elements,
+        ).send()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
 # =============================================================================
@@ -755,6 +807,17 @@ async def on_message(message: cl.Message):
                 cl.user_session.set("edit_target_leito", None)
             else:
                 cl.user_session.set("current_summary", extracted)
+
+        # Attach PDF button if any summaries exist in the session
+        has_summaries = (
+            bool(cl.user_session.get("confirmed_leitos"))
+            or bool(cl.user_session.get("current_summary"))
+        )
+        if has_summaries:
+            response_msg.actions = [
+                cl.Action(name="gerar_pdf", value="pdf", label="📄 Gerar PDF da Sessão")
+            ]
+            await response_msg.update()
 
         # Add assistant response to history and cap to prevent context overflow
         history.append({"role": "assistant", "content": full_response})

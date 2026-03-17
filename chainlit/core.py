@@ -26,7 +26,7 @@ class SumarioPaciente(BaseModel):
     Campos:
     - leito: Número do leito
     - nome_paciente: Nome do paciente
-    - diagnosticos: Lista de diagnósticos atuais
+    - quadro_clinico: Lista do quadro clínico atual
     - pendencias: Lista de pendências/tarefas em aberto
     - condutas: Lista de condutas tomadas ou planejadas
     """
@@ -34,7 +34,7 @@ class SumarioPaciente(BaseModel):
     leito: str = Field(description="Número do leito. Se mencionado explicitamente, use apenas o número (ex: '1', '2'). Se ocluído/inaudível mas inferível pela sequência, use 'N (inferido)'. Se não identificável, use 'N/A'.")
     nome_paciente: str = Field(description="Nome completo do paciente como mencionado")
     
-    diagnosticos: list[str] = Field(
+    quadro_clinico: list[str] = Field(
         description="Lista de PROBLEMAS MÉDICOS ATUAIS que requerem tratamento."
     )
     
@@ -50,8 +50,8 @@ class SumarioPaciente(BaseModel):
         """Formata o sumário no padrão de saída para exibição."""
         linhas = [f"Leito {self.leito} - {self.nome_paciente}", ""]
         
-        linhas.append("Diagnósticos:")
-        for i, diag in enumerate(self.diagnosticos, 1):
+        linhas.append("Quadro Clínico:")
+        for i, diag in enumerate(self.quadro_clinico, 1):
             linhas.append(f"{i}- {diag}")
         linhas.append("")
         
@@ -92,12 +92,12 @@ Se algo não foi mencionado, NÃO inclua.
 
 === REGRAS DE CATEGORIZAÇÃO ===
 
-1. DIAGNÓSTICOS - O que incluir:
+1. QUADRO CLÍNICO - O que incluir:
    - APENAS problemas médicos ATUAIS que requerem tratamento
    - Pós-operatório APENAS se for o contexto principal do caso
    - Condições patológicas explicitamente nomeadas
-   
-   O que NÃO incluir como diagnóstico:
+
+   O que NÃO incluir no quadro clínico:
    - Sintomas que EXPLICAM outras coisas (ex: "rebaixamento de consciência" que levou à intubação)
    - Achados laboratoriais isolados (lactato alto, leucocitose) - são justificativas, não diagnósticos
 
@@ -152,13 +152,13 @@ Retorne um JSON com a seguinte estrutura:
 {{
     "leito": "número do leito (extraia da transcrição; se ocluído/inaudível, infira pela sequência numérica e use o formato 'N (inferido)'; use 'N/A' apenas se não for possível inferir)",
     "nome_paciente": "nome do paciente",
-    "diagnosticos": ["diagnóstico 1", "diagnóstico 2"],
+    "quadro_clinico": ["problema clínico 1", "problema clínico 2"],
     "pendencias": ["pendência 1", "pendência 2"],
     "condutas": ["Conduta 1 (começando com verbo no infinitivo)", "Conduta 2"]
 }}
 
 CHECKLIST antes de responder:
-1. Diagnósticos: São PROBLEMAS MÉDICOS ATUAIS?
+1. Quadro Clínico: São PROBLEMAS MÉDICOS ATUAIS?
 2. Pendências: Incluí todos os desmames/avaliações em andamento?
 3. Condutas: Todas começam com verbo no INFINITIVO?
 4. Condutas: Consolidei itens relacionados? Incluí justificativas e doses?

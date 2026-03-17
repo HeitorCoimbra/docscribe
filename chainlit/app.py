@@ -227,8 +227,8 @@ FORMATO OBRIGATÓRIO DE RESPOSTA (UM LEITO POR VEZ):
 
 **Leito [X] - [Nome do Paciente]**
 
-**Diagnósticos:**
-1. [diagnóstico extraído ou 🔴 PENDENTE]
+**Quadro Clínico:**
+1. [problema clínico extraído ou 🔴 PENDENTE]
 
 **Pendências:**
 1. [pendência extraída ou 🔴 PENDENTE]

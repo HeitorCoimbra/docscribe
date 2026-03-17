@@ -815,7 +815,7 @@ async def on_message(message: cl.Message):
         )
         if has_summaries:
             response_msg.actions = [
-                cl.Action(name="gerar_pdf", value="pdf", label="📄 Gerar PDF da Sessão")
+                cl.Action(name="gerar_pdf", payload={"action": "gerar_pdf"}, label="📄 Gerar PDF da Sessão")
             ]
             await response_msg.update()
 

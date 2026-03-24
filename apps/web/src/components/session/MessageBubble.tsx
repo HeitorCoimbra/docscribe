@@ -41,15 +41,16 @@ export function MessageBubble({ message, isStreaming }: Props) {
           isStreaming && "animate-pulse"
         )}
       >
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          className="prose-sm max-w-none dark:prose-invert"
-          components={{
-            p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
-          }}
-        >
-          {message.content}
-        </ReactMarkdown>
+        <div className="prose-sm max-w-none dark:prose-invert">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+            }}
+          >
+            {message.content}
+          </ReactMarkdown>
+        </div>
         {isStreaming && !message.content && (
           <span className="inline-block h-4 w-1 bg-current animate-pulse" />
         )}

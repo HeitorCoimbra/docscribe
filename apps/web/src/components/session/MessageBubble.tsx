@@ -49,6 +49,7 @@ export function MessageBubble({ message, isStreaming }: Props) {
               ul: ({ children }) => <ul className="list-disc list-inside space-y-0.5 mb-1">{children}</ul>,
               ol: ({ children }) => <ol className="list-decimal list-inside space-y-0.5 mb-1">{children}</ol>,
               li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+              hr: () => <hr className="my-3 border-border" />,
             }}
           >
             {message.content}

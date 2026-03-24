@@ -46,6 +46,9 @@ export function MessageBubble({ message, isStreaming }: Props) {
             remarkPlugins={[remarkGfm]}
             components={{
               p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+              ul: ({ children }) => <ul className="list-disc list-inside space-y-0.5 mb-1">{children}</ul>,
+              ol: ({ children }) => <ol className="list-decimal list-inside space-y-0.5 mb-1">{children}</ol>,
+              li: ({ children }) => <li className="leading-relaxed">{children}</li>,
             }}
           >
             {message.content}

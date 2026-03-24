@@ -40,3 +40,11 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Data
+data/

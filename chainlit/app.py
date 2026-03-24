@@ -152,12 +152,25 @@ import re
 
 
 def extract_summary_from_response(response: str) -> str | None:
-    """Extract the structured summary block from Claude's response."""
+    """Extract the first structured summary block (used for single-leito edits)."""
     pattern = r'(\*\*Leito\s+.+?)(?:\n---|\Z)'
     match = re.search(pattern, response, re.DOTALL)
     if match:
         return match.group(1).strip()
     return None
+
+
+def extract_all_leitos_from_response(response: str) -> dict:
+    """Extract ALL leito summaries from a response. Returns {leito_num: summary}."""
+    result = {}
+    blocks = re.split(r'\n---+\n?', response)
+    for block in blocks:
+        block = block.strip()
+        if re.match(r'\*\*Leito\s+', block, re.IGNORECASE):
+            num = extract_leito_number(block)
+            if num:
+                result[num] = block
+    return result
 
 
 def extract_leito_number(summary: str) -> str | None:
@@ -176,55 +189,79 @@ def detect_referenced_leito(text: str, confirmed_leitos: dict) -> str | None:
 
 def build_system_prompt(
     confirmed_leitos: dict | None = None,
-    current_summary: str | None = None,
     edit_target_leito: str | None = None
 ) -> str:
-    """Build the system prompt with confirmed leitos context and current editable summary."""
-    confirmed_context = ""
-    if confirmed_leitos:
-        if edit_target_leito and edit_target_leito in confirmed_leitos:
-            others = {k: v for k, v in confirmed_leitos.items() if k != edit_target_leito}
-            target_summary = confirmed_leitos[edit_target_leito]
-            if others:
-                block = "\n\n".join(others.values())
-                confirmed_context = f"""
-=== LEITOS CONFIRMADOS (NÃO REPRODUZA NA RESPOSTA) ===
+    """Build the system prompt.
+
+    - edit_target_leito set: single-leito update mode.
+    - edit_target_leito None: multi-leito extraction mode.
+    """
+    current_date = datetime.now().strftime("%d/%m/%Y")
+
+    if edit_target_leito and confirmed_leitos and edit_target_leito in confirmed_leitos:
+        others = {k: v for k, v in confirmed_leitos.items() if k != edit_target_leito}
+        target_summary = confirmed_leitos[edit_target_leito]
+        others_context = ""
+        if others:
+            block = "\n\n".join(others.values())
+            others_context = f"""
+=== OUTROS LEITOS CONFIRMADOS (NÃO REPRODUZA NA RESPOSTA) ===
 {block}
 === FIM ===\n"""
-            confirmed_context += f"""
+
+        return f"""Data de hoje: {current_date}
+
+{SYSTEM_PROMPT}
+
+=== INSTRUCOES DE COMPORTAMENTO ===
+
+O usuário está corrigindo o Leito {edit_target_leito}. Mostre o sumário COMPLETO atualizado desse leito.
+Não repita os outros leitos. Condutas SEMPRE começam com verbo no INFINITIVO. Seja conciso.
+
+FORMATO OBRIGATÓRIO DE RESPOSTA:
+
+**Leito [X] - [Nome do Paciente]**
+
+**Quadro Clínico:**
+1. [problema clínico]
+
+**Pendências:**
+1. [pendência]
+
+**Condutas:**
+- [conduta com verbo no infinitivo]
+
+---
+Deseja corrigir ou adicionar algo?
+
+{others_context}
 === LEITO {edit_target_leito} EM REEDIÇÃO (atualize com as novas informações) ===
 {target_summary}
 === FIM ==="""
-        else:
+
+    else:
+        confirmed_context = ""
+        if confirmed_leitos:
             block = "\n\n".join(confirmed_leitos.values())
             confirmed_context = f"""
 === LEITOS JÁ CONFIRMADOS (NÃO REPRODUZA ESTES NA RESPOSTA) ===
 {block}
 === FIM DOS LEITOS CONFIRMADOS ===
 
-IMPORTANTE: Não repita os leitos acima. Sua resposta deve conter SOMENTE o novo leito da transcrição atual."""
+IMPORTANTE: Não repita os leitos acima. Extraia SOMENTE os leitos novos da transcrição atual."""
 
-    current_context = ""
-    if current_summary and not edit_target_leito:
-        current_context = f"""
-=== SUMÁRIO DO LEITO EM EDIÇÃO (use como base para atualizações) ===
-{current_summary}
-=== FIM DO SUMÁRIO EM EDIÇÃO ==="""
-
-    current_date = datetime.now().strftime("%d/%m/%Y")
-
-    return f"""Data de hoje: {current_date}
+        return f"""Data de hoje: {current_date}
 
 {SYSTEM_PROMPT}
 
 === INSTRUCOES DE COMPORTAMENTO ===
 
-Quando receber uma transcrição de áudio, responda IMEDIATAMENTE com o sumário do NOVO leito apenas.
-Não repita leitos já confirmados. Não faça perguntas antes de mostrar o sumário.
+Quando receber uma transcrição de áudio, extraia TODOS os leitos presentes na transcrição e responda com TODOS eles.
+Não faça perguntas antes de mostrar os sumários.
 
 Para campos não preenchíveis, use: 🔴 PENDENTE
 
-FORMATO OBRIGATÓRIO DE RESPOSTA (UM LEITO POR VEZ):
+FORMATO OBRIGATÓRIO DE RESPOSTA (repita o bloco abaixo para CADA leito encontrado, separados por ---):
 
 **Leito [X] - [Nome do Paciente]**
 
@@ -238,15 +275,11 @@ FORMATO OBRIGATÓRIO DE RESPOSTA (UM LEITO POR VEZ):
 - [conduta com verbo no infinitivo ou 🔴 PENDENTE]
 
 ---
-Deseja corrigir ou adicionar algo?
 
-=== REGRAS DE ATUALIZAÇÃO ===
-- Quando o usuário enviar correções, mostre o sumário COMPLETO do leito atual atualizado (não todos os leitos)
-- Condutas SEMPRE começam com verbo no INFINITIVO
-- Seja conciso. Não repita instruções ao usuário.
+Se a transcrição contiver múltiplos leitos, liste TODOS em sequência com --- entre eles.
+Condutas SEMPRE começam com verbo no INFINITIVO. Seja conciso.
 
-{confirmed_context}
-{current_context}"""
+{confirmed_context}"""
 
 
 # =============================================================================
@@ -350,11 +383,7 @@ async def on_gerar_pdf(action: cl.Action):
     import os
 
     confirmed_leitos = cl.user_session.get("confirmed_leitos", {})
-    current_summary = cl.user_session.get("current_summary")
-
     all_summaries = list(confirmed_leitos.values())
-    if current_summary and current_summary not in all_summaries:
-        all_summaries.append(current_summary)
 
     if not all_summaries:
         await cl.Message(content="⚠️ Nenhum sumário disponível para gerar o PDF.").send()
@@ -413,7 +442,6 @@ async def on_chat_start():
 
     cl.user_session.set("thread_id", thread_id)
     cl.user_session.set("message_history", [])
-    cl.user_session.set("current_summary", None)
     cl.user_session.set("confirmed_leitos", {})
     cl.user_session.set("edit_target_leito", None)
     cl.user_session.set("thread_persisted", False)
@@ -743,21 +771,13 @@ async def on_message(message: cl.Message):
         await cl.Message(content="❌ ANTHROPIC_API_KEY não configurada").send()
         return
     
-    # Routing: confirm previous leito on new audio, or detect targeted leito edit
-    if transcriptions:
-        prev = cl.user_session.get("current_summary")
-        if prev:
-            num = extract_leito_number(prev)
-            if num:
-                confirmed = cl.user_session.get("confirmed_leitos", {})
-                confirmed[num] = prev
-                cl.user_session.set("confirmed_leitos", confirmed)
-        cl.user_session.set("current_summary", None)
-        cl.user_session.set("edit_target_leito", None)
-    else:
+    # Routing: detect targeted leito edit for text messages
+    if not transcriptions:
         confirmed = cl.user_session.get("confirmed_leitos", {})
         ref = detect_referenced_leito(user_content, confirmed)
         cl.user_session.set("edit_target_leito", ref)
+    else:
+        cl.user_session.set("edit_target_leito", None)
 
     # Generate response with Claude
     response_msg = cl.Message(content="")
@@ -778,14 +798,12 @@ async def on_message(message: cl.Message):
         # Stream response
         full_response = ""
         confirmed_leitos = cl.user_session.get("confirmed_leitos", {})
-        current_summary  = cl.user_session.get("current_summary")
         edit_target      = cl.user_session.get("edit_target_leito")
         with client.messages.stream(
             model=CLAUDE_MODEL,
             max_tokens=4096,
             system=build_system_prompt(
                 confirmed_leitos=confirmed_leitos,
-                current_summary=current_summary,
                 edit_target_leito=edit_target
             ),
             messages=api_messages
@@ -796,23 +814,24 @@ async def on_message(message: cl.Message):
 
         await response_msg.update()
 
-        # Store response in correct location
-        extracted = extract_summary_from_response(full_response)
-        if extracted:
-            edit_target = cl.user_session.get("edit_target_leito")
-            if edit_target:
-                confirmed = cl.user_session.get("confirmed_leitos", {})
+        # Update confirmed_leitos from response
+        confirmed = cl.user_session.get("confirmed_leitos", {})
+        if edit_target:
+            # Single-leito edit: update just that leito
+            extracted = extract_summary_from_response(full_response)
+            if extracted:
                 confirmed[edit_target] = extracted
                 cl.user_session.set("confirmed_leitos", confirmed)
                 cl.user_session.set("edit_target_leito", None)
-            else:
-                cl.user_session.set("current_summary", extracted)
+        else:
+            # New audio/transcription: extract ALL leitos
+            new_leitos = extract_all_leitos_from_response(full_response)
+            if new_leitos:
+                confirmed.update(new_leitos)
+                cl.user_session.set("confirmed_leitos", confirmed)
 
         # Attach PDF button if any summaries exist in the session
-        has_summaries = (
-            bool(cl.user_session.get("confirmed_leitos"))
-            or bool(cl.user_session.get("current_summary"))
-        )
+        has_summaries = bool(cl.user_session.get("confirmed_leitos"))
         if has_summaries:
             response_msg.actions = [
                 cl.Action(name="gerar_pdf", payload={"action": "gerar_pdf"}, label="📄 Gerar PDF da Sessão")
@@ -908,7 +927,6 @@ async def on_chat_resume(thread: ThreadDict):
 
         cl.user_session.set("thread_id", thread_id)
         cl.user_session.set("thread_persisted", True)
-        cl.user_session.set("current_summary", None)
         cl.user_session.set("confirmed_leitos", {})
         cl.user_session.set("edit_target_leito", None)
 
@@ -976,24 +994,12 @@ async def on_chat_resume(thread: ThreadDict):
                     "size": len(content_bytes),
                 }
 
-        # Restore confirmed_leitos and current_summary from all assistant messages
+        # Restore confirmed_leitos from all assistant messages
         confirmed_leitos = {}
-        last_summary = None
         for msg in history:
             if msg.get("role") == "assistant":
-                extracted = extract_summary_from_response(msg.get("content", ""))
-                if extracted:
-                    num = extract_leito_number(extracted)
-                    if num:
-                        confirmed_leitos[num] = extracted
-                    last_summary = extracted
-
-        # Last summary stays editable; remove it from confirmed
-        if last_summary:
-            last_num = extract_leito_number(last_summary)
-            if last_num and last_num in confirmed_leitos:
-                del confirmed_leitos[last_num]
-            cl.user_session.set("current_summary", last_summary)
+                new_leitos = extract_all_leitos_from_response(msg.get("content", ""))
+                confirmed_leitos.update(new_leitos)
 
         cl.user_session.set("confirmed_leitos", confirmed_leitos)
     except Exception as e:

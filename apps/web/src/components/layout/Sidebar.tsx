@@ -38,21 +38,30 @@ export function Sidebar() {
         {isLoading && (
           <div className="px-2 py-4 text-xs text-muted-foreground">Carregando...</div>
         )}
-        {groups?.map((group) => (
-          <div key={group.date} className="mb-3">
-            <div className="px-2 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              {group.label}
+        {groups?.map((group) => {
+          const visibleThreads = group.threads.filter((thread) => {
+            const isEmpty =
+              (!thread.title || thread.title === 'Nova Sessão') &&
+              Object.keys(thread.confirmed_leitos).length === 0;
+            return !isEmpty || pathname === `/app/sessao/${thread.id}`;
+          });
+          if (visibleThreads.length === 0) return null;
+          return (
+            <div key={group.date} className="mb-3">
+              <div className="px-2 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                {group.label}
+              </div>
+              {visibleThreads.map((thread) => (
+                <SidebarThreadItem
+                  key={thread.id}
+                  thread={thread}
+                  isActive={pathname === `/app/sessao/${thread.id}`}
+                  onClick={() => router.push(`/app/sessao/${thread.id}`)}
+                />
+              ))}
             </div>
-            {group.threads.map((thread) => (
-              <SidebarThreadItem
-                key={thread.id}
-                thread={thread}
-                isActive={pathname === `/app/sessao/${thread.id}`}
-                onClick={() => router.push(`/app/sessao/${thread.id}`)}
-              />
-            ))}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Footer: theme toggle */}

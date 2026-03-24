@@ -1,12 +1,7 @@
-import re
 from datetime import datetime, date, timezone
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from ..models import Thread
-
-THREAD_TITLE_PATTERN = re.compile(
-    r"[*]*Leito\s+(\d+|[A-Za-z]+)\s*[-\u2013]\s*([A-Za-z\u00C0-\u00ff\s]+)[*]*"
-)
 
 
 def _utcnow():
@@ -74,28 +69,30 @@ class ThreadRepository:
         # Return ordered by date descending
         return [groups[k] for k in sorted(groups.keys(), reverse=True)]
 
-    def update_thread_title(self, thread_id: str, leito: str, patient_name: str):
-        thread = self.get_thread(thread_id)
-        if thread:
-            thread.leito = leito
-            thread.patient_name = patient_name
-            thread.title = f"Leito {leito} - {patient_name}"
-            thread.updated_at = _utcnow()
-            self.db.commit()
+    def _compute_session_number(self, thread: Thread) -> int:
+        threads_on_day = (
+            self.db.query(Thread)
+            .filter(Thread.user_id == thread.user_id, Thread.created_date == thread.created_date)
+            .order_by(Thread.created_at.asc())
+            .all()
+        )
+        for i, t in enumerate(threads_on_day, 1):
+            if t.id == thread.id:
+                return i
+        return 1
 
-    def update_thread_from_response(self, thread_id: str, response: str):
-        """Extract leito/patient from an assistant response and update thread title."""
-        match = THREAD_TITLE_PATTERN.search(response)
-        if match:
-            leito = match.group(1).strip()
-            patient_name = re.sub(r"[*\n].*", "", match.group(2)).strip()
-            if leito and patient_name and len(patient_name) > 1:
-                self.update_thread_title(thread_id, leito, patient_name)
+    def _generate_title(self, thread: Thread, leito_count: int) -> str:
+        session_num = self._compute_session_number(thread)
+        date_str = thread.created_date.strftime("%d/%m")
+        leito_label = "1 leito" if leito_count == 1 else f"{leito_count} leitos"
+        return f"{date_str} · Sessão {session_num} · {leito_label}"
 
     def update_confirmed_leitos(self, thread_id: str, confirmed_leitos: dict):
         thread = self.get_thread(thread_id)
         if thread:
             thread.confirmed_leitos = confirmed_leitos
+            if confirmed_leitos:
+                thread.title = self._generate_title(thread, len(confirmed_leitos))
             thread.updated_at = _utcnow()
             self.db.commit()
 

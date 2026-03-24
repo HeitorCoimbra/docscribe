@@ -63,7 +63,7 @@ export function useSessionState(initial: ThreadDetail | null) {
     []
   );
 
-  const addUserMessage = useCallback((content: string, hasAudio = false) => {
+  const addUserMessage = useCallback((content: string, hasAudio = false, audioUrl?: string) => {
     setState((s) => {
       const msg: Message = {
         id: crypto.randomUUID(),
@@ -71,6 +71,7 @@ export function useSessionState(initial: ThreadDetail | null) {
         role: 'user',
         content,
         has_audio: hasAudio,
+        audioUrl,
         transcription: null,
         created_at: new Date().toISOString(),
       };

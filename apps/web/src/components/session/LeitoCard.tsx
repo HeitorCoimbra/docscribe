@@ -1,4 +1,5 @@
 import type { LeitoSummary } from '@/types/session';
+import ReactMarkdown from 'react-markdown';
 
 interface Props {
   leito: string;
@@ -22,7 +23,7 @@ export function LeitoCard({ leito, summary }: Props) {
           </div>
           <ol className="list-decimal list-inside space-y-0.5 text-xs leading-relaxed">
             {summary.quadro_clinico.map((item, i) => (
-              <li key={i}>{item}</li>
+              <li key={i}><ReactMarkdown components={{ p: ({ children }) => <>{children}</> }}>{item}</ReactMarkdown></li>
             ))}
           </ol>
         </div>
@@ -35,7 +36,7 @@ export function LeitoCard({ leito, summary }: Props) {
           </div>
           <ol className="list-decimal list-inside space-y-0.5 text-xs leading-relaxed">
             {summary.pendencias.map((item, i) => (
-              <li key={i}>{item}</li>
+              <li key={i}><ReactMarkdown components={{ p: ({ children }) => <>{children}</> }}>{item}</ReactMarkdown></li>
             ))}
           </ol>
         </div>
@@ -50,7 +51,7 @@ export function LeitoCard({ leito, summary }: Props) {
             {summary.condutas.map((item, i) => (
               <li key={i} className="flex gap-1">
                 <span className="text-muted-foreground">•</span>
-                <span>{item}</span>
+                <span><ReactMarkdown components={{ p: ({ children }) => <>{children}</> }}>{item}</ReactMarkdown></span>
               </li>
             ))}
           </ul>

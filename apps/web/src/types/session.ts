@@ -26,6 +26,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   has_audio: boolean;
+  audioUrl?: string;
   transcription: string | null;
   created_at: string;
 }

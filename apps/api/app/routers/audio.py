@@ -130,7 +130,6 @@ async def upload_audio(
         except Exception as exc:
             logger.error(f"Structured extraction error: {exc}")
 
-        thread_repo.update_thread_from_response(thread_id, full_response)
         db.refresh(thread)
 
         yield _sse({

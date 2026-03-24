@@ -49,7 +49,8 @@ export function SessionView({ thread }: Props) {
   };
 
   const handleSendAudio = async (blob: Blob): Promise<void> => {
-    addUserMessage(blob instanceof File ? `[Arquivo: ${blob.name}]` : '[Áudio gravado]', true);
+    const audioUrl = URL.createObjectURL(blob);
+    addUserMessage('', true, audioUrl);
     startStreaming();
     let fullContent = '';
 

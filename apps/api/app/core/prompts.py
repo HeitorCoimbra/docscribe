@@ -102,7 +102,10 @@ LEITO_EXTRACTION_TOOL = {
                             "type": "string",
                             "description": "Número do leito (ex: '1', '4A', '7 (inferido)')",
                         },
-                        "nome_paciente": {"type": "string"},
+                        "nome_paciente": {
+                            "type": "string",
+                            "description": "Nome do paciente. Se não mencionado na transcrição, usar string vazia \"\".",
+                        },
                         "quadro_clinico": {"type": "array", "items": {"type": "string"}},
                         "pendencias": {"type": "array", "items": {"type": "string"}},
                         "condutas": {"type": "array", "items": {"type": "string"}},
@@ -206,7 +209,7 @@ Para campos não preenchíveis, use: 🔴 PENDENTE
 
 FORMATO OBRIGATÓRIO DE RESPOSTA (repita o bloco abaixo para CADA leito encontrado, separados por ---):
 
-**Leito [X] - [Nome do Paciente]**
+**Leito [X] - [Nome do Paciente | deixar vazio se não mencionado]**
 
 **Quadro Clínico:**
 1. [problema clínico extraído ou 🔴 PENDENTE]

@@ -7,22 +7,20 @@ Tasks are grouped by type: **fixes** (broken or degraded behaviour) and **featur
 
 ## Fixes
 
-### F1 — Render markdown in chat bubbles and leito cards (HIGH)
-Raw markdown (`**bold**`, `1. item`, `- item`) is displayed as literal text in `MessageBubble` and `LeitoCard`.
-- Add `react-markdown` (or similar) to `apps/web/package.json`
-- Replace `<pre>` in `MessageBubble` with a markdown renderer
-- Replace raw text in `LeitoCard` with the same renderer
-- Files: `apps/web/src/components/session/MessageBubble.tsx`, `apps/web/src/components/session/LeitoCard.tsx`
+### ~~F1 — Render markdown in chat bubbles and leito cards~~ ✅ DONE
+`react-markdown` + `remark-gfm` implemented in both `MessageBubble.tsx` and `LeitoCard.tsx`.
 
-### F2 — Replace audio filename user bubble with a styled chip (MEDIUM)
-User messages show raw filenames like `[Arquivo: WhatsApp Audio 2026-03-23 at 07.26.25.opus]`.
-Should show a compact audio chip: mic/waveform icon + short label (e.g. "Áudio gravado" or truncated filename).
-- File: `apps/web/src/components/session/SessionView.tsx` (`handleSendAudio` label), `MessageBubble.tsx`
+### ~~F2 — Replace audio filename user bubble with a styled chip~~ ✅ DONE
+`MessageBubble` renders an audio chip (Mic icon + `<audio>` player if URL available, else "Áudio gravado" pill).
 
-### F3 — Add visual section dividers inside LeitoCard (MEDIUM)
-Quadro Clínico / Pendências / Condutas sections blend together inside each card.
-Even after F1 (markdown rendering), a subtle separator or coloured section label would improve scannability.
-- File: `apps/web/src/components/session/LeitoCard.tsx`
+### ~~F3 — Add visual section dividers inside LeitoCard~~ ✅ DONE
+Section headers (Quadro Clínico / Pendências / Condutas) rendered with uppercase tracking labels in `LeitoCard.tsx`.
+
+### ~~F7 — "Pendência" badge fires for all leitos~~ ✅ DONE
+Removed `summary.pendencias.length > 0` from `hasAlert` in `LeitoCard.tsx`. Badge now only triggers on missing patient name or explicit `🔴 PENDENTE` markers.
+
+### ~~F8 — Patient name placeholder not triggering alert badge~~ ✅ DONE
+Enforced `""` (empty string) in `LEITO_EXTRACTION_TOOL` schema description and prompt template (`prompts.py`). Frontend check `!summary.nome_paciente` now reliably catches unknown patients.
 
 ### F4 — Clean up untitled "Nova Sessão" sidebar entries (LOW)
 Sessions that never received audio get persisted with the title "Nova Sessão" and pollute the sidebar.
@@ -49,9 +47,21 @@ Right-panel section labels currently show only "LEITO 1". Add the patient name: 
 There is no UI to delete a thread. The `DELETE /api/v1/threads/{id}` endpoint exists but is not wired up.
 - Files: `apps/web/src/components/layout/SidebarThreadItem.tsx`, `apps/web/src/hooks/useThreads.ts` (`useDeleteThread` already exists)
 
-### FT3 — Mobile sidebar (drawer/overlay)
-The sidebar is always visible and takes fixed width. On small screens it collapses the main area. Needs a hamburger toggle + overlay drawer for mobile.
-- Files: `apps/web/src/components/layout/Sidebar.tsx`, `apps/web/src/app/app/layout.tsx`
+### ~~FT3 — Mobile sidebar (drawer/overlay)~~ ✅ DONE
+Sidebar is now a fixed overlay on mobile (z-30, slide-in/out with backdrop). Hamburger button in `TopBar` triggers it via `SidebarContext`. Desktop gets a collapse-to-icon-strip toggle (ChevronLeft/Right). `SidebarProvider` wraps the app layout.
+- Files: `SidebarContext.tsx` (new), `Sidebar.tsx`, `TopBar.tsx`, `app/app/layout.tsx`
+
+### FT3b — Right panel (Leitos) mobile accessibility (MEDIUM)
+On small screens the two-column layout (chat + leitos panel) is too cramped. The leitos panel should stack below the chat or be accessible via a tab/toggle.
+- File: `apps/web/src/app/app/sessao/[id]/page.tsx` or `SessionView.tsx`
+
+### FT3c — Touch-friendly tap targets (LOW)
+Several buttons (LeitoCard toggle, SidebarThreadItem, audio chip) are smaller than 44×44px, making them hard to tap on mobile.
+- Files: `LeitoCard.tsx`, `SidebarThreadItem.tsx`, `MessageBubble.tsx`
+
+### FT3d — Viewport meta / overflow on mobile (LOW)
+Verify `<meta name="viewport">` is set and no horizontal overflow occurs on small screens (e.g. wide code blocks, PDF button row).
+- Files: `apps/web/src/app/layout.tsx`
 
 ### FT4 — Loading skeletons
 No loading state is shown while the thread list or session data is fetching. Add skeleton placeholders.

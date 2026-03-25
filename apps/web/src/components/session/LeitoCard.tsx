@@ -21,7 +21,6 @@ export function LeitoCard({ leito, summary }: Props) {
   const [isOpen, setIsOpen] = useState(false);
 
   const hasAlert =
-    summary.pendencias.length > 0 ||
     !summary.nome_paciente ||
     [...summary.quadro_clinico, ...summary.pendencias, ...summary.condutas].some(
       (s) => s.includes('PENDENTE') || s.includes('🔴')

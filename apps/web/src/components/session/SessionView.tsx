@@ -9,6 +9,7 @@ import { LeitosPanel } from "./LeitosPanel";
 import { MessageInput } from "@/components/input/MessageInput";
 import { useSessionState } from "@/hooks/useSession";
 import { useStreamingSummary } from "@/hooks/useStreamingSummary";
+import { cn } from "@/lib/utils";
 
 interface Props {
   thread: ThreadDetail;
@@ -23,14 +24,29 @@ export function SessionView({ thread }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
   const sendAudioRef = useRef<(blob: Blob) => Promise<void>>(() => Promise.resolve());
+  const [activeTab, setActiveTab] = useState<'chat' | 'leitos'>('chat');
+
+  const leitoCount = Object.keys(state.confirmedLeitos).length;
+  const hasLeitos = leitoCount > 0;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [state.messages, state.streamingContent]);
 
+  // Auto-switch to leitos tab on mobile when first leito appears
+  useEffect(() => {
+    if (leitoCount === 1 && activeTab === 'chat') {
+      // Only auto-switch on mobile (md breakpoint = 768px)
+      if (window.innerWidth < 768) {
+        setActiveTab('leitos');
+      }
+    }
+  }, [leitoCount]);
+
   const handleSendText = async (content: string) => {
     addUserMessage(content, false);
     startStreaming();
+    setActiveTab('chat');
     let fullContent = '';
 
     try {
@@ -86,6 +102,7 @@ export function SessionView({ thread }: Props) {
     const audioUrl = URL.createObjectURL(blob);
     addUserMessage('', true, audioUrl);
     startStreaming();
+    setActiveTab('chat');
     let fullContent = '';
 
     try {
@@ -111,7 +128,7 @@ export function SessionView({ thread }: Props) {
 
   return (
     <div
-      className="flex h-full relative"
+      className="flex flex-col h-full relative"
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -124,39 +141,74 @@ export function SessionView({ thread }: Props) {
           <p className="text-sm font-medium text-primary">Solte os arquivos de áudio aqui</p>
         </div>
       )}
-      {/* Main chat column */}
-      <div className="flex flex-1 flex-col min-w-0">
-        {/* Thread title */}
-        <div className="border-b border-border px-6 py-3">
-          <h2 className="text-sm font-medium">{state.thread?.title || "Nova Sessão"}</h2>
-        </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-          <MessageList
-            messages={state.messages}
-            streamingContent={state.streamingContent}
-            transcription={state.transcription}
-            isStreaming={state.isStreaming}
-          />
-          <div ref={messagesEndRef} />
+      {/* Mobile tab bar — only when leitos exist */}
+      {hasLeitos && (
+        <div className="flex border-b border-border md:hidden shrink-0">
+          <button
+            onClick={() => setActiveTab('chat')}
+            className={cn(
+              "flex-1 py-2 text-sm font-medium",
+              activeTab === 'chat' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'
+            )}
+          >
+            Chat
+          </button>
+          <button
+            onClick={() => setActiveTab('leitos')}
+            className={cn(
+              "flex-1 py-2 text-sm font-medium",
+              activeTab === 'leitos' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'
+            )}
+          >
+            Leitos ({leitoCount})
+          </button>
         </div>
-
-        {/* Input */}
-        <div className="border-t border-border px-6 py-4">
-          <MessageInput
-            onSendText={handleSendText}
-            onSendAudio={handleSendAudio}
-            disabled={state.isStreaming}
-            threadId={thread.id}
-          />
-        </div>
-      </div>
-
-      {/* Leitos panel */}
-      {Object.keys(state.confirmedLeitos).length > 0 && (
-        <LeitosPanel confirmedLeitos={state.confirmedLeitos} threadId={thread.id} />
       )}
+
+      {/* Content row: chat + leitos side by side on desktop, tab-switched on mobile */}
+      <div className="flex flex-1 min-h-0">
+        {/* Main chat column */}
+        <div
+          className={cn(
+            "flex flex-col min-w-0",
+            hasLeitos && activeTab === 'leitos' ? "hidden md:flex flex-1" : "flex flex-1"
+          )}
+        >
+          {/* Thread title */}
+          <div className="border-b border-border px-4 md:px-6 py-3">
+            <h2 className="text-sm font-medium">{state.thread?.title || "Nova Sessão"}</h2>
+          </div>
+
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-3 py-3 md:px-6 md:py-4">
+            <MessageList
+              messages={state.messages}
+              streamingContent={state.streamingContent}
+              transcription={state.transcription}
+              isStreaming={state.isStreaming}
+            />
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input */}
+          <div className="border-t border-border px-3 py-3 md:px-6 md:py-4">
+            <MessageInput
+              onSendText={handleSendText}
+              onSendAudio={handleSendAudio}
+              disabled={state.isStreaming}
+              threadId={thread.id}
+            />
+          </div>
+        </div>
+
+        {/* Leitos panel */}
+        {hasLeitos && (
+          <div className={cn(activeTab === 'chat' ? "hidden md:block" : "flex-1 md:flex-none")}>
+            <LeitosPanel confirmedLeitos={state.confirmedLeitos} threadId={thread.id} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

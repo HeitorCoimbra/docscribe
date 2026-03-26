@@ -18,7 +18,7 @@ export function MessageBubble({ message, isStreaming }: Props) {
         {message.audioUrl ? (
           <div className="inline-flex items-center gap-2 rounded-2xl bg-primary/10 px-3 py-2">
             <Mic className="h-3.5 w-3.5 text-primary shrink-0" />
-            <audio controls src={message.audioUrl} className="h-8 max-w-[220px]" />
+            <audio controls src={message.audioUrl} className="h-8 max-w-[180px] sm:max-w-[220px]" />
           </div>
         ) : (
           <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/20 text-primary px-3 py-1.5 text-xs font-medium">
@@ -34,7 +34,7 @@ export function MessageBubble({ message, isStreaming }: Props) {
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[80%] rounded-lg px-4 py-2.5 text-sm",
+          "max-w-[90%] md:max-w-[80%] rounded-lg px-4 py-2.5 text-sm",
           isUser
             ? "bg-primary text-primary-foreground"
             : "bg-muted text-foreground border border-border",

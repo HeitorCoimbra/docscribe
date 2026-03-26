@@ -3,13 +3,16 @@ import { usePathname, useRouter } from "next/navigation";
 import { PlusIcon, Moon, Sun, Stethoscope, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
-import { useThreads } from "@/hooks/useThreads";
+import { useThreads, useDeleteThread } from "@/hooks/useThreads";
+import { toast } from "sonner";
 import { SidebarThreadItem } from "./SidebarThreadItem";
 import { useSidebar } from "./SidebarContext";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export function Sidebar() {
   const { data: groups, isLoading } = useThreads();
+  const deleteThread = useDeleteThread();
   const pathname = usePathname();
   const router = useRouter();
   const { theme, setTheme } = useTheme();
@@ -88,7 +91,11 @@ export function Sidebar() {
         {!collapsed && (
           <div className="flex-1 overflow-y-auto px-2">
             {isLoading && (
-              <div className="px-2 py-4 text-xs text-muted-foreground">Carregando...</div>
+              <div className="px-2 py-3 space-y-1">
+                {[80, 64, 72, 56].map((w) => (
+                  <Skeleton key={w} className="h-7 rounded-md" style={{ width: `${w}%` }} />
+                ))}
+              </div>
             )}
             {groups?.map((group) => {
               const visibleThreads = group.threads.filter((thread) => {
@@ -109,6 +116,16 @@ export function Sidebar() {
                       thread={thread}
                       isActive={pathname === `/app/sessao/${thread.id}`}
                       onClick={() => navigate(`/app/sessao/${thread.id}`)}
+                      onDelete={() => {
+                        deleteThread.mutate(thread.id, {
+                          onSuccess: () => {
+                            toast.success('Sessão excluída');
+                            if (pathname === `/app/sessao/${thread.id}`) {
+                              router.push('/app/sessao/nova');
+                            }
+                          },
+                        });
+                      }}
                     />
                   ))}
                 </div>

@@ -42,7 +42,7 @@ export function LeitosPanel({ confirmedLeitos, threadId }: Props) {
   });
 
   return (
-    <aside className="w-80 border-l border-border flex flex-col h-full overflow-hidden">
+    <aside className="w-full md:w-80 border-l border-border flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <span className="text-sm font-medium">Leitos confirmados</span>
         <Button

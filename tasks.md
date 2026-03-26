@@ -39,13 +39,11 @@ The transcription accordion is expected to appear in the chat after each audio s
 
 ## Features
 
-### FT1 — Leitos panel section header includes patient name
-Right-panel section labels currently show only "LEITO 1". Add the patient name: "LEITO 1 — José Rodrigues" to improve navigation when many leitos are present.
-- File: `apps/web/src/components/session/LeitosPanel.tsx`
+### ~~FT1 — Leitos panel section header includes patient name~~ ✅ DONE
+`LeitoCard` header already renders `Leito {n} — {nome_paciente}`. No change needed.
 
-### FT2 — Delete thread from sidebar
-There is no UI to delete a thread. The `DELETE /api/v1/threads/{id}` endpoint exists but is not wired up.
-- Files: `apps/web/src/components/layout/SidebarThreadItem.tsx`, `apps/web/src/hooks/useThreads.ts` (`useDeleteThread` already exists)
+### ~~FT2 — Delete thread from sidebar~~ ✅ DONE
+Trash icon appears on hover in `SidebarThreadItem`. `Sidebar` wires `useDeleteThread`, shows toast, and redirects to `/app/sessao/nova` if the deleted thread was active.
 
 ### ~~FT3 — Mobile sidebar (drawer/overlay)~~ ✅ DONE
 Sidebar is now a fixed overlay on mobile (z-30, slide-in/out with backdrop). Hamburger button in `TopBar` triggers it via `SidebarContext`. Desktop gets a collapse-to-icon-strip toggle (ChevronLeft/Right). `SidebarProvider` wraps the app layout.
@@ -63,13 +61,11 @@ Several buttons (LeitoCard toggle, SidebarThreadItem, audio chip) are smaller th
 Verify `<meta name="viewport">` is set and no horizontal overflow occurs on small screens (e.g. wide code blocks, PDF button row).
 - Files: `apps/web/src/app/layout.tsx`
 
-### FT4 — Loading skeletons
-No loading state is shown while the thread list or session data is fetching. Add skeleton placeholders.
-- Files: `apps/web/src/components/layout/Sidebar.tsx`, `apps/web/src/app/app/sessao/[id]/page.tsx`
+### ~~FT4 — Loading skeletons~~ ✅ DONE
+`Skeleton` component added. Sidebar replaces "Carregando..." with animated placeholder bars. `loading.tsx` added to the session route — Next.js shows it automatically during the server fetch.
 
-### FT5 — Copy leito summary to clipboard
-Add a copy button on each `LeitoCard` to copy the formatted summary text for pasting into other systems.
-- File: `apps/web/src/components/session/LeitoCard.tsx`
+### ~~FT5 — Copy leito summary to clipboard~~ ✅ DONE
+`Copy` icon button appears on hover in `LeitoCard` header. Copies plain-text summary (header, numbered Quadro Clínico/Pendências, bulleted Condutas) via `navigator.clipboard` and shows "Copiado!" toast.
 
 ### FT6 — Railway deployment configuration
 The `apps/api/railway.json` and web Dockerfile exist but the Railway project (two services + Postgres add-on, env vars, internal networking) has not been set up and smoke-tested in production.
